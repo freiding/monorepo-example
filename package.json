@@ -1,0 +1,14 @@
+{
+  "name": "demo-app",
+  "private": true,
+  "scripts": {
+    "install:all": "npm --prefix packages/backend install && npm --prefix packages/frontend install",
+    "dev": "concurrently -n be,fe -c blue,green \"npm --prefix packages/backend run dev\" \"npm --prefix packages/frontend run dev\"",
+    "build": "npm --prefix packages/backend run build && npm --prefix packages/frontend run build",
+    "db:push": "npm --prefix packages/backend run db:push",
+    "db:generate": "npm --prefix packages/backend run db:generate"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
