@@ -25,6 +25,9 @@ services:
       DATABASE_URL: postgresql://demo:demo@postgres:5432/demo
       JWT_SECRET: dev-jwt-secret-change-in-production
       PORT: 3000
+      SSO_ISSUER: ${SSO_ISSUER:-}
+      SSO_CLIENT_ID: ${SSO_CLIENT_ID:-}
+      SSO_CLIENT_SECRET: ${SSO_CLIENT_SECRET:-}
     ports:
       - "3000:3000"
     volumes:

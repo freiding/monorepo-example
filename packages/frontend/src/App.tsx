@@ -4,6 +4,7 @@ import { LoginPage } from './pages/LoginPage'
 import { RegisterPage } from './pages/RegisterPage'
 import { TasksPage } from './pages/TasksPage'
 import { ProfilePage } from './pages/ProfilePage'
+import { SsoCallbackPage } from './pages/SsoCallbackPage'
 import { Layout } from './components/Layout'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -23,6 +24,7 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
       <Route path="/register" element={<PublicRoute><RegisterPage /></PublicRoute>} />
+      <Route path="/auth/callback" element={<SsoCallbackPage />} />
       <Route path="/tasks" element={<PrivateRoute><Layout><TasksPage /></Layout></PrivateRoute>} />
       <Route path="/profile" element={<PrivateRoute><Layout><ProfilePage /></Layout></PrivateRoute>} />
       <Route path="*" element={<Navigate to="/tasks" replace />} />

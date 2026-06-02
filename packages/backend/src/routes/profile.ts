@@ -27,7 +27,7 @@ profileRouter.put('/', async (req, res) => {
     return
   }
 
-  const data: Record<string, string> = {}
+  const data: Record<string, string | null> = {}
   if (name !== undefined) data.name = name
   if (email && email !== user.email) {
     const taken = await prisma.user.findUnique({ where: { email } })
@@ -38,15 +38,19 @@ profileRouter.put('/', async (req, res) => {
     data.email = email
   }
   if (newPassword) {
-    if (!currentPassword) {
-      res.status(400).json({ error: 'Current password required' })
-      return
+    if (user.password) {
+      // Changing existing password — current password required
+      if (!currentPassword) {
+        res.status(400).json({ error: 'Current password required' })
+        return
+      }
+      const valid = await bcrypt.compare(currentPassword, user.password)
+      if (!valid) {
+        res.status(400).json({ error: 'Current password is incorrect' })
+        return
+      }
     }
-    const valid = await bcrypt.compare(currentPassword, user.password)
-    if (!valid) {
-      res.status(400).json({ error: 'Current password is incorrect' })
-      return
-    }
+    // SSO user setting a password for the first time — no current password needed
     data.password = await bcrypt.hash(newPassword, 10)
   }
 
