@@ -72,30 +72,28 @@ authRouter.get('/me', requireAuth, async (req, res) => {
   res.json(user)
 })
 
-const ssoExchangeSchema = z.object({
-  code: z.string(),
-  codeVerifier: z.string(),
-  redirectUri: z.string().url(),
-})
+// --- SSO helpers ---
 
-authRouter.post('/sso/exchange', async (req, res) => {
+interface SsoUserinfo {
+  sub: string
+  email: string
+  name?: string
+}
+
+async function exchangeCodeForUserinfo(
+  code: string,
+  codeVerifier: string,
+  redirectUri: string,
+): Promise<{ userinfo: SsoUserinfo } | { error: string; status: number }> {
   const ssoIssuer = process.env.SSO_ISSUER
   const clientId = process.env.SSO_CLIENT_ID
   const clientSecret = process.env.SSO_CLIENT_SECRET
 
   if (!ssoIssuer || !clientId || !clientSecret) {
-    res.status(501).json({ error: 'SSO is not configured on this server' })
-    return
+    return { error: 'SSO is not configured on this server', status: 501 }
   }
 
-  const result = ssoExchangeSchema.safeParse(req.body)
-  if (!result.success) {
-    res.status(400).json({ error: result.error.errors[0].message })
-    return
-  }
-  const { code, codeVerifier, redirectUri } = result.data
-
-  let tokenData: { access_token: string }
+  let accessToken: string
   try {
     const tokenRes = await fetch(`${ssoIssuer}/oauth/token`, {
       method: 'POST',
@@ -111,34 +109,53 @@ authRouter.post('/sso/exchange', async (req, res) => {
     })
     if (!tokenRes.ok) {
       const body = await tokenRes.text()
-      res.status(400).json({ error: 'SSO token exchange failed', detail: body })
-      return
+      return { error: `SSO token exchange failed: ${body}`, status: 400 }
     }
-    tokenData = await tokenRes.json() as { access_token: string }
+    const data = await tokenRes.json() as { access_token: string }
+    accessToken = data.access_token
   } catch {
-    res.status(502).json({ error: 'Could not reach SSO server' })
-    return
+    return { error: 'Could not reach SSO server', status: 502 }
   }
 
-  let userinfo: { sub: string; email: string; name?: string }
   try {
-    const userinfoRes = await fetch(`${ssoIssuer}/oauth/userinfo`, {
-      headers: { Authorization: `Bearer ${tokenData.access_token}` },
+    const userinfoRes = await fetch(`${process.env.SSO_ISSUER}/oauth/userinfo`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
     })
     if (!userinfoRes.ok) {
-      res.status(400).json({ error: 'Failed to get user info from SSO' })
-      return
+      return { error: 'Failed to get user info from SSO', status: 400 }
     }
-    userinfo = await userinfoRes.json() as { sub: string; email: string; name?: string }
+    const userinfo = await userinfoRes.json() as SsoUserinfo
+    if (!userinfo.email) {
+      return { error: 'SSO did not return an email address', status: 400 }
+    }
+    return { userinfo }
   } catch {
-    res.status(502).json({ error: 'Could not reach SSO server' })
-    return
+    return { error: 'Could not reach SSO server', status: 502 }
   }
+}
 
-  if (!userinfo.email) {
-    res.status(400).json({ error: 'SSO did not return an email address' })
+// --- SSO routes ---
+
+const ssoSchema = z.object({
+  code: z.string(),
+  codeVerifier: z.string(),
+  redirectUri: z.string().url(),
+})
+
+authRouter.post('/sso/exchange', async (req, res) => {
+  const result = ssoSchema.safeParse(req.body)
+  if (!result.success) {
+    res.status(400).json({ error: result.error.errors[0].message })
     return
   }
+  const { code, codeVerifier, redirectUri } = result.data
+
+  const outcome = await exchangeCodeForUserinfo(code, codeVerifier, redirectUri)
+  if ('error' in outcome) {
+    res.status(outcome.status).json({ error: outcome.error })
+    return
+  }
+  const { userinfo } = outcome
 
   let user = await prisma.user.findUnique({ where: { email: userinfo.email } })
   if (!user) {
@@ -149,4 +166,44 @@ authRouter.post('/sso/exchange', async (req, res) => {
 
   const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET!, { expiresIn: '7d' })
   res.json({ token, user: { id: user.id, email: user.email, name: user.name } })
+})
+
+authRouter.post('/sso/migrate', requireAuth, async (req, res) => {
+  const result = ssoSchema.safeParse(req.body)
+  if (!result.success) {
+    res.status(400).json({ error: result.error.errors[0].message })
+    return
+  }
+  const { code, codeVerifier, redirectUri } = result.data
+
+  const outcome = await exchangeCodeForUserinfo(code, codeVerifier, redirectUri)
+  if ('error' in outcome) {
+    res.status(outcome.status).json({ error: outcome.error })
+    return
+  }
+  const { userinfo } = outcome
+
+  const user = await prisma.user.findUnique({ where: { id: req.userId } })
+  if (!user) {
+    res.status(404).json({ error: 'User not found' })
+    return
+  }
+
+  if (userinfo.email.toLowerCase() !== user.email.toLowerCase()) {
+    res.status(400).json({
+      error: `SSO account email (${userinfo.email}) does not match your account email (${user.email}). Migration requires matching emails.`,
+    })
+    return
+  }
+
+  const updated = await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      password: null,
+      name: userinfo.name ?? user.name,
+    },
+    select: { id: true, email: true, name: true },
+  })
+
+  res.json({ success: true, user: updated })
 })

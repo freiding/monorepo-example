@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { generateCodeVerifier, generateCodeChallenge } from '../lib/pkce'
+import { SsoMigrationModal } from '../components/SsoMigrationModal'
 
 const SSO_ISSUER = import.meta.env.VITE_SSO_ISSUER as string | undefined
 const SSO_CLIENT_ID = import.meta.env.VITE_SSO_CLIENT_ID as string | undefined
@@ -13,6 +14,7 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [showMigrationModal, setShowMigrationModal] = useState(false)
   const { login } = useAuth()
   const navigate = useNavigate()
 
@@ -23,7 +25,11 @@ export function LoginPage() {
     try {
       const { data } = await api.post('/api/auth/login', { email, password })
       login(data.token, data.user)
-      navigate('/tasks')
+      if (ssoEnabled) {
+        setShowMigrationModal(true)
+      } else {
+        navigate('/tasks')
+      }
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: string } } }).response?.data?.error
       setError(msg || 'Login failed')
@@ -40,6 +46,30 @@ export function LoginPage() {
 
     sessionStorage.setItem('pkce_verifier', verifier)
     sessionStorage.setItem('oauth_state', state)
+    sessionStorage.setItem('pkce_intent', 'login')
+
+    const redirectUri = `${window.location.origin}/auth/callback`
+    const params = new URLSearchParams({
+      client_id: SSO_CLIENT_ID,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: 'openid profile email',
+      code_challenge: challenge,
+      code_challenge_method: 'S256',
+      state,
+    })
+    window.location.href = `${SSO_ISSUER}/oauth/authorize?${params}`
+  }
+
+  async function handleMigrate() {
+    if (!SSO_ISSUER || !SSO_CLIENT_ID) return
+    const verifier = generateCodeVerifier()
+    const challenge = await generateCodeChallenge(verifier)
+    const state = crypto.randomUUID()
+
+    sessionStorage.setItem('pkce_verifier', verifier)
+    sessionStorage.setItem('oauth_state', state)
+    sessionStorage.setItem('pkce_intent', 'migrate')
 
     const redirectUri = `${window.location.origin}/auth/callback`
     const params = new URLSearchParams({
@@ -117,6 +147,13 @@ export function LoginPage() {
           </Link>
         </p>
       </div>
+
+      {showMigrationModal && (
+        <SsoMigrationModal
+          onMigrate={handleMigrate}
+          onSkip={() => navigate('/tasks')}
+        />
+      )}
     </div>
   )
 }
