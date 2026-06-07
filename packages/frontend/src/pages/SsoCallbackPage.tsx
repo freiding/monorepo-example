@@ -54,7 +54,9 @@ export function SsoCallbackPage() {
     if (intent === 'migrate') {
       api.post('/api/auth/sso/migrate', { code, codeVerifier: verifier, redirectUri })
         .then(({ data }) => {
-          updateUser(data.user)
+          // Токен уже лежит в localStorage (положен перед редиректом на SSO)
+          const token = localStorage.getItem('token')!
+          login(token, data.user)
           setMigrated(true)
           setTimeout(() => navigate('/tasks', { replace: true }), 2000)
         })

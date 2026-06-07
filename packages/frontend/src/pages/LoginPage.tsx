@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
-import { useAuth } from '../context/AuthContext'
+import { useAuth, User } from '../context/AuthContext'
 import { generateCodeVerifier, generateCodeChallenge } from '../lib/pkce'
 import { SsoMigrationModal } from '../components/SsoMigrationModal'
 
@@ -10,23 +10,22 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const [showMigrationModal, setShowMigrationModal] = useState(false)
+  // Держим токен/юзера локально пока показывается модалка —
+  // login() в контекст НЕ вызываем, иначе PublicRoute сразу редиректит
+  const [pendingAuth, setPendingAuth] = useState<{ token: string; user: User } | null>(null)
   const { login, ssoConfig } = useAuth()
   const navigate = useNavigate()
 
-  async function startSsoFlow(intent: 'login' | 'migrate') {
-    if (!ssoConfig.enabled || !ssoConfig.issuer || !ssoConfig.clientId) return
+  async function buildSsoUrl(intent: 'login' | 'migrate'): Promise<string> {
     const verifier = generateCodeVerifier()
     const challenge = await generateCodeChallenge(verifier)
     const state = crypto.randomUUID()
-
     sessionStorage.setItem('pkce_verifier', verifier)
     sessionStorage.setItem('oauth_state', state)
     sessionStorage.setItem('pkce_intent', intent)
-
     const redirectUri = `${window.location.origin}/auth/callback`
     const params = new URLSearchParams({
-      client_id: ssoConfig.clientId,
+      client_id: ssoConfig.clientId!,
       redirect_uri: redirectUri,
       response_type: 'code',
       scope: 'openid profile email',
@@ -34,7 +33,7 @@ export function LoginPage() {
       code_challenge_method: 'S256',
       state,
     })
-    window.location.href = `${ssoConfig.issuer}/oauth/authorize?${params}`
+    return `${ssoConfig.issuer}/oauth/authorize?${params}`
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -43,10 +42,11 @@ export function LoginPage() {
     setLoading(true)
     try {
       const { data } = await api.post('/api/auth/login', { email, password })
-      login(data.token, data.user)
       if (ssoConfig.enabled) {
-        setShowMigrationModal(true)
+        // Сохраняем без login() — контекст не обновляем, PublicRoute не сработает
+        setPendingAuth({ token: data.token, user: data.user })
       } else {
+        login(data.token, data.user)
         navigate('/tasks')
       }
     } catch (err: unknown) {
@@ -55,6 +55,23 @@ export function LoginPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  async function handleSsoLogin() {
+    if (!ssoConfig.enabled) return
+    window.location.href = await buildSsoUrl('login')
+  }
+
+  async function handleMigrate() {
+    if (!pendingAuth || !ssoConfig.enabled) return
+    // Кладём токен в localStorage ДО редиректа — callback нужен для /sso/migrate
+    localStorage.setItem('token', pendingAuth.token)
+    window.location.href = await buildSsoUrl('migrate')
+  }
+
+  function handleSkipMigration() {
+    if (pendingAuth) login(pendingAuth.token, pendingAuth.user)
+    navigate('/tasks')
   }
 
   return (
@@ -67,7 +84,7 @@ export function LoginPage() {
           <>
             <button
               type="button"
-              onClick={() => startSsoFlow('login')}
+              onClick={handleSsoLogin}
               className="w-full flex items-center justify-center gap-2 border border-gray-200 rounded-lg py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
             >
               <SsoIcon />
@@ -121,10 +138,10 @@ export function LoginPage() {
         </p>
       </div>
 
-      {showMigrationModal && (
+      {pendingAuth && (
         <SsoMigrationModal
-          onMigrate={() => startSsoFlow('migrate')}
-          onSkip={() => navigate('/tasks')}
+          onMigrate={handleMigrate}
+          onSkip={handleSkipMigration}
         />
       )}
     </div>
