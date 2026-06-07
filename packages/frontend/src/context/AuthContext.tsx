@@ -7,8 +7,15 @@ export interface User {
   name?: string | null
 }
 
+export interface SsoConfig {
+  enabled: boolean
+  issuer?: string
+  clientId?: string
+}
+
 interface AuthContextValue {
   user: User | null
+  ssoConfig: SsoConfig
   login: (token: string, user: User) => void
   logout: () => void
   updateUser: (user: User) => void
@@ -19,18 +26,21 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
+  const [ssoConfig, setSsoConfig] = useState<SsoConfig>({ enabled: false })
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const token = localStorage.getItem('token')
-    if (!token) {
-      setLoading(false)
-      return
-    }
-    api.get('/api/auth/me')
-      .then(res => setUser(res.data))
-      .catch(() => localStorage.removeItem('token'))
-      .finally(() => setLoading(false))
+
+    const userPromise = token
+      ? api.get('/api/auth/me').then(res => setUser(res.data)).catch(() => localStorage.removeItem('token'))
+      : Promise.resolve()
+
+    const ssoPromise = api.get<SsoConfig>('/api/auth/sso/config')
+      .then(res => setSsoConfig(res.data))
+      .catch(() => {})
+
+    Promise.all([userPromise, ssoPromise]).finally(() => setLoading(false))
   }, [])
 
   function login(token: string, newUser: User) {
@@ -48,7 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, updateUser, loading }}>
+    <AuthContext.Provider value={{ user, ssoConfig, login, logout, updateUser, loading }}>
       {children}
     </AuthContext.Provider>
   )
