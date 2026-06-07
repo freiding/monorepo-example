@@ -72,6 +72,13 @@ authRouter.get('/me', requireAuth, async (req, res) => {
   res.json(user)
 })
 
+authRouter.get('/sso/config', (_req, res) => {
+  const issuer = process.env.SSO_ISSUER
+  const clientId = process.env.SSO_CLIENT_ID
+  const enabled = !!(issuer && clientId && process.env.SSO_CLIENT_SECRET)
+  res.json(enabled ? { enabled: true, issuer, clientId } : { enabled: false })
+})
+
 // --- SSO helpers ---
 
 interface SsoUserinfo {

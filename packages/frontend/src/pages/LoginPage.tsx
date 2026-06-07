@@ -5,18 +5,37 @@ import { useAuth } from '../context/AuthContext'
 import { generateCodeVerifier, generateCodeChallenge } from '../lib/pkce'
 import { SsoMigrationModal } from '../components/SsoMigrationModal'
 
-const SSO_ISSUER = import.meta.env.VITE_SSO_ISSUER as string | undefined
-const SSO_CLIENT_ID = import.meta.env.VITE_SSO_CLIENT_ID as string | undefined
-const ssoEnabled = !!(SSO_ISSUER && SSO_CLIENT_ID)
-
 export function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [showMigrationModal, setShowMigrationModal] = useState(false)
-  const { login } = useAuth()
+  const { login, ssoConfig } = useAuth()
   const navigate = useNavigate()
+
+  async function startSsoFlow(intent: 'login' | 'migrate') {
+    if (!ssoConfig.enabled || !ssoConfig.issuer || !ssoConfig.clientId) return
+    const verifier = generateCodeVerifier()
+    const challenge = await generateCodeChallenge(verifier)
+    const state = crypto.randomUUID()
+
+    sessionStorage.setItem('pkce_verifier', verifier)
+    sessionStorage.setItem('oauth_state', state)
+    sessionStorage.setItem('pkce_intent', intent)
+
+    const redirectUri = `${window.location.origin}/auth/callback`
+    const params = new URLSearchParams({
+      client_id: ssoConfig.clientId,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: 'openid profile email',
+      code_challenge: challenge,
+      code_challenge_method: 'S256',
+      state,
+    })
+    window.location.href = `${ssoConfig.issuer}/oauth/authorize?${params}`
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -25,7 +44,7 @@ export function LoginPage() {
     try {
       const { data } = await api.post('/api/auth/login', { email, password })
       login(data.token, data.user)
-      if (ssoEnabled) {
+      if (ssoConfig.enabled) {
         setShowMigrationModal(true)
       } else {
         navigate('/tasks')
@@ -38,63 +57,17 @@ export function LoginPage() {
     }
   }
 
-  async function handleSsoLogin() {
-    if (!SSO_ISSUER || !SSO_CLIENT_ID) return
-    const verifier = generateCodeVerifier()
-    const challenge = await generateCodeChallenge(verifier)
-    const state = crypto.randomUUID()
-
-    sessionStorage.setItem('pkce_verifier', verifier)
-    sessionStorage.setItem('oauth_state', state)
-    sessionStorage.setItem('pkce_intent', 'login')
-
-    const redirectUri = `${window.location.origin}/auth/callback`
-    const params = new URLSearchParams({
-      client_id: SSO_CLIENT_ID,
-      redirect_uri: redirectUri,
-      response_type: 'code',
-      scope: 'openid profile email',
-      code_challenge: challenge,
-      code_challenge_method: 'S256',
-      state,
-    })
-    window.location.href = `${SSO_ISSUER}/oauth/authorize?${params}`
-  }
-
-  async function handleMigrate() {
-    if (!SSO_ISSUER || !SSO_CLIENT_ID) return
-    const verifier = generateCodeVerifier()
-    const challenge = await generateCodeChallenge(verifier)
-    const state = crypto.randomUUID()
-
-    sessionStorage.setItem('pkce_verifier', verifier)
-    sessionStorage.setItem('oauth_state', state)
-    sessionStorage.setItem('pkce_intent', 'migrate')
-
-    const redirectUri = `${window.location.origin}/auth/callback`
-    const params = new URLSearchParams({
-      client_id: SSO_CLIENT_ID,
-      redirect_uri: redirectUri,
-      response_type: 'code',
-      scope: 'openid profile email',
-      code_challenge: challenge,
-      code_challenge_method: 'S256',
-      state,
-    })
-    window.location.href = `${SSO_ISSUER}/oauth/authorize?${params}`
-  }
-
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="w-full max-w-sm bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
         <h1 className="text-2xl font-semibold mb-1">Sign in</h1>
         <p className="text-sm text-gray-400 mb-6">Welcome back</p>
 
-        {ssoEnabled && (
+        {ssoConfig.enabled && (
           <>
             <button
               type="button"
-              onClick={handleSsoLogin}
+              onClick={() => startSsoFlow('login')}
               className="w-full flex items-center justify-center gap-2 border border-gray-200 rounded-lg py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
             >
               <SsoIcon />
@@ -116,7 +89,7 @@ export function LoginPage() {
               value={email}
               onChange={e => setEmail(e.target.value)}
               required
-              autoFocus={!ssoEnabled}
+              autoFocus={!ssoConfig.enabled}
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
@@ -150,7 +123,7 @@ export function LoginPage() {
 
       {showMigrationModal && (
         <SsoMigrationModal
-          onMigrate={handleMigrate}
+          onMigrate={() => startSsoFlow('migrate')}
           onSkip={() => navigate('/tasks')}
         />
       )}
