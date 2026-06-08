@@ -196,13 +196,6 @@ authRouter.post('/sso/migrate', requireAuth, async (req, res) => {
     return
   }
 
-  if (userinfo.email.toLowerCase() !== user.email.toLowerCase()) {
-    res.status(400).json({
-      error: `SSO account email (${userinfo.email}) does not match your account email (${user.email}). Migration requires matching emails.`,
-    })
-    return
-  }
-
   const updated = await prisma.user.update({
     where: { id: user.id },
     data: {
