@@ -132,6 +132,7 @@ async function exchangeCodeForUserinfo(
       return { error: 'Failed to get user info from SSO', status: 400 }
     }
     const userinfo = await userinfoRes.json() as SsoUserinfo
+    console.log('[SSO userinfo]', JSON.stringify(userinfo))
     if (!userinfo.email) {
       return { error: 'SSO did not return an email address', status: 400 }
     }
