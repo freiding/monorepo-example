@@ -26,7 +26,14 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <Link to="/profile" className={linkClass('/profile')}>Profile</Link>
           </div>
           <div className="flex items-center gap-4">
-            <span className="text-sm text-gray-400">{user?.name || user?.email}</span>
+            {user?.avatar && (
+              <img
+                src={`http://localhost:3000${user.avatar}`}
+                alt="Avatar"
+                className="w-7 h-7 rounded-full object-cover"
+              />
+            )}
+            <span className="text-sm text-gray-400">{user?.username || user?.email}</span>
             <button
               onClick={handleLogout}
               className="text-sm text-red-400 hover:text-red-600 transition-colors"

@@ -1,14 +1,32 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import bcrypt from 'bcryptjs'
+import path from 'path'
+import multer from 'multer'
 import { prisma } from '../lib/prisma'
 import { requireAuth } from '../middleware/auth'
 
 export const profileRouter = Router()
 profileRouter.use(requireAuth)
 
+const storage = multer.diskStorage({
+  destination: path.join(process.cwd(), 'uploads/avatars'),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname)
+    cb(null, `${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`)
+  },
+})
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) cb(null, true)
+    else cb(new Error('Only image files are allowed'))
+  },
+})
+
 const updateProfileSchema = z.object({
-  name: z.string().optional(),
+  username: z.string().min(2).max(32).optional(),
   email: z.string().email().optional(),
   currentPassword: z.string().optional(),
   newPassword: z.string().min(6).optional(),
@@ -20,7 +38,7 @@ profileRouter.put('/', async (req, res) => {
     res.status(400).json({ error: result.error.errors[0].message })
     return
   }
-  const { name, email, currentPassword, newPassword } = result.data
+  const { username, email, currentPassword, newPassword } = result.data
   const user = await prisma.user.findUnique({ where: { id: req.userId } })
   if (!user) {
     res.status(404).json({ error: 'User not found' })
@@ -28,7 +46,14 @@ profileRouter.put('/', async (req, res) => {
   }
 
   const data: Record<string, string | null> = {}
-  if (name !== undefined) data.name = name
+  if (username !== undefined) {
+    const taken = await prisma.user.findFirst({ where: { username, NOT: { id: req.userId } } })
+    if (taken) {
+      res.status(400).json({ error: 'Username already taken' })
+      return
+    }
+    data.username = username
+  }
   if (email && email !== user.email) {
     const taken = await prisma.user.findUnique({ where: { email } })
     if (taken) {
@@ -39,7 +64,6 @@ profileRouter.put('/', async (req, res) => {
   }
   if (newPassword) {
     if (user.password) {
-      // Changing existing password — current password required
       if (!currentPassword) {
         res.status(400).json({ error: 'Current password required' })
         return
@@ -50,14 +74,27 @@ profileRouter.put('/', async (req, res) => {
         return
       }
     }
-    // SSO user setting a password for the first time — no current password needed
     data.password = await bcrypt.hash(newPassword, 10)
   }
 
   const updated = await prisma.user.update({
     where: { id: req.userId },
     data,
-    select: { id: true, email: true, name: true },
+    select: { id: true, email: true, username: true, avatar: true },
+  })
+  res.json(updated)
+})
+
+profileRouter.post('/avatar', upload.single('avatar'), async (req, res) => {
+  if (!req.file) {
+    res.status(400).json({ error: 'No file uploaded' })
+    return
+  }
+  const avatarUrl = `/uploads/avatars/${req.file.filename}`
+  const updated = await prisma.user.update({
+    where: { id: req.userId },
+    data: { avatar: avatarUrl },
+    select: { id: true, email: true, username: true, avatar: true },
   })
   res.json(updated)
 })
