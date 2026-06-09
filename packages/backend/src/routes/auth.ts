@@ -171,14 +171,22 @@ authRouter.post('/sso/exchange', async (req, res) => {
   const { userinfo } = outcome
 
   let user = await prisma.user.findUnique({ where: { email: userinfo.email } })
+  const ssoUsername = resolveSsoUsername(userinfo.username ?? null)
   if (!user) {
-    const ssoUsername = resolveSsoUsername(userinfo.username ?? null)
     const usernameAvailable = ssoUsername
       ? !(await prisma.user.findUnique({ where: { username: ssoUsername } }))
       : false
     user = await prisma.user.create({
       data: { email: userinfo.email, password: null, username: usernameAvailable ? ssoUsername : null },
     })
+  } else if (!user.username && ssoUsername) {
+    const usernameAvailable = !(await prisma.user.findUnique({ where: { username: ssoUsername } }))
+    if (usernameAvailable) {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: { username: ssoUsername },
+      })
+    }
   }
 
   const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET!, { expiresIn: '7d' })
