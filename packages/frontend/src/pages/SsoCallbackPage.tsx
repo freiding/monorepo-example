@@ -32,12 +32,12 @@ export function SsoCallbackPage() {
       return
     }
 
-    const savedState = sessionStorage.getItem('oauth_state')
-    const verifier = sessionStorage.getItem('pkce_verifier')
-    const intent = (sessionStorage.getItem('pkce_intent') || 'login') as Intent
-    sessionStorage.removeItem('oauth_state')
-    sessionStorage.removeItem('pkce_verifier')
-    sessionStorage.removeItem('pkce_intent')
+    const savedState = localStorage.getItem('oauth_state')
+    const verifier = localStorage.getItem('pkce_verifier')
+    const intent = (localStorage.getItem('pkce_intent') || 'login') as Intent
+    localStorage.removeItem('oauth_state')
+    localStorage.removeItem('pkce_verifier')
+    localStorage.removeItem('pkce_intent')
 
     if (state !== savedState) {
       setError('State mismatch — possible CSRF. Please try again.')

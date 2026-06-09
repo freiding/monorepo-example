@@ -20,9 +20,9 @@ export function LoginPage() {
     const verifier = generateCodeVerifier()
     const challenge = await generateCodeChallenge(verifier)
     const state = crypto.randomUUID()
-    sessionStorage.setItem('pkce_verifier', verifier)
-    sessionStorage.setItem('oauth_state', state)
-    sessionStorage.setItem('pkce_intent', intent)
+    localStorage.setItem('pkce_verifier', verifier)
+    localStorage.setItem('oauth_state', state)
+    localStorage.setItem('pkce_intent', intent)
     const redirectUri = `${window.location.origin}/auth/callback`
     const params = new URLSearchParams({
       client_id: ssoConfig.clientId!,
