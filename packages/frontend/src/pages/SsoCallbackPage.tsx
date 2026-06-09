@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
-import { useAuth } from '../context/AuthContext'
+import { useAuth, User } from '../context/AuthContext'
+import { SetupProfileModal } from '../components/SetupProfileModal'
 
 type Intent = 'login' | 'migrate'
 
@@ -10,6 +11,7 @@ export function SsoCallbackPage() {
   const navigate = useNavigate()
   const [error, setError] = useState<string | null>(null)
   const [migrated, setMigrated] = useState(false)
+  const [pendingSetup, setPendingSetup] = useState<{ token: string } | null>(null)
   const called = useRef(false)
 
   useEffect(() => {
@@ -54,7 +56,6 @@ export function SsoCallbackPage() {
     if (intent === 'migrate') {
       api.post('/api/auth/sso/migrate', { code, codeVerifier: verifier, redirectUri })
         .then(({ data }) => {
-          // Токен уже лежит в localStorage (положен перед редиректом на SSO)
           const token = localStorage.getItem('token')!
           login(token, data.user)
           setMigrated(true)
@@ -67,8 +68,14 @@ export function SsoCallbackPage() {
     } else {
       api.post('/api/auth/sso/exchange', { code, codeVerifier: verifier, redirectUri })
         .then(({ data }) => {
-          login(data.token, data.user)
-          navigate('/tasks', { replace: true })
+          if (!data.user.username) {
+            // New SSO user — store token for modal API calls, prompt for username
+            localStorage.setItem('token', data.token)
+            setPendingSetup({ token: data.token })
+          } else {
+            login(data.token, data.user)
+            navigate('/tasks', { replace: true })
+          }
         })
         .catch(err => {
           const msg = (err as { response?: { data?: { error?: string } } }).response?.data?.error
@@ -76,6 +83,15 @@ export function SsoCallbackPage() {
         })
     }
   }, [login, updateUser, navigate])
+
+  function handleSetupComplete(user: User) {
+    login(pendingSetup!.token, user)
+    navigate('/tasks', { replace: true })
+  }
+
+  if (pendingSetup) {
+    return <SetupProfileModal onComplete={handleSetupComplete} />
+  }
 
   if (error) {
     return (
