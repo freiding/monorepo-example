@@ -84,6 +84,7 @@ interface SsoUserinfo {
   sub: string
   email: string
   name?: string
+  username?: string
 }
 
 async function exchangeCodeForUserinfo(
@@ -140,6 +141,12 @@ async function exchangeCodeForUserinfo(
   }
 }
 
+function resolveSsoUsername(raw: string | null): string | null {
+  if (!raw) return null
+  const sanitized = raw.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32)
+  return sanitized.length >= 2 ? sanitized : null
+}
+
 // --- SSO routes ---
 
 const ssoSchema = z.object({
@@ -165,8 +172,12 @@ authRouter.post('/sso/exchange', async (req, res) => {
 
   let user = await prisma.user.findUnique({ where: { email: userinfo.email } })
   if (!user) {
+    const ssoUsername = resolveSsoUsername(userinfo.username ?? null)
+    const usernameAvailable = ssoUsername
+      ? !(await prisma.user.findUnique({ where: { username: ssoUsername } }))
+      : false
     user = await prisma.user.create({
-      data: { email: userinfo.email, password: null },
+      data: { email: userinfo.email, password: null, username: usernameAvailable ? ssoUsername : null },
     })
   }
 
