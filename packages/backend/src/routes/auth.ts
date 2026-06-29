@@ -171,22 +171,26 @@ authRouter.post('/sso/exchange', async (req, res) => {
   }
   const { userinfo } = outcome
 
-  let user = await prisma.user.findUnique({ where: { email: userinfo.email } })
+  let user =
+    (await prisma.user.findUnique({ where: { ssoId: userinfo.sub } })) ??
+    (await prisma.user.findUnique({ where: { email: userinfo.email } }))
   const ssoUsername = resolveSsoUsername(userinfo.username ?? null)
   if (!user) {
     const usernameAvailable = ssoUsername
       ? !(await prisma.user.findUnique({ where: { username: ssoUsername } }))
       : false
     user = await prisma.user.create({
-      data: { email: userinfo.email, password: null, username: usernameAvailable ? ssoUsername : null },
+      data: { email: userinfo.email, ssoId: userinfo.sub, password: null, username: usernameAvailable ? ssoUsername : null },
     })
-  } else if (!user.username && ssoUsername) {
-    const usernameAvailable = !(await prisma.user.findUnique({ where: { username: ssoUsername } }))
-    if (usernameAvailable) {
-      user = await prisma.user.update({
-        where: { id: user.id },
-        data: { username: ssoUsername },
-      })
+  } else {
+    const updates: Record<string, string | null> = {}
+    if (!user.ssoId) updates.ssoId = userinfo.sub
+    if (!user.username && ssoUsername) {
+      const usernameAvailable = !(await prisma.user.findUnique({ where: { username: ssoUsername } }))
+      if (usernameAvailable) updates.username = ssoUsername
+    }
+    if (Object.keys(updates).length > 0) {
+      user = await prisma.user.update({ where: { id: user.id }, data: updates })
     }
   }
 
@@ -216,7 +220,7 @@ authRouter.post('/sso/migrate', requireAuth, async (req, res) => {
 
   const updated = await prisma.user.update({
     where: { id: user.id },
-    data: { password: null },
+    data: { password: null, ssoId: outcome.userinfo.sub },
     select: { id: true, email: true, username: true, avatar: true },
   })
 
