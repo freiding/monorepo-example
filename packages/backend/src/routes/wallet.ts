@@ -36,6 +36,7 @@ async function ssoFetch(userId: string, path: string, init: RequestInit = {}): P
 async function proxyToSso(userId: string, path: string, init: RequestInit = {}) {
   const resp = await ssoFetch(userId, path, init)
   const body = await resp.json().catch(() => ({ error: 'SSO returned non-JSON response' }))
+  if (!resp.ok) console.error(`[wallet proxy] SSO ${init.method ?? 'GET'} ${path} → ${resp.status}`, body)
   return { status: resp.status, body }
 }
 

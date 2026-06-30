@@ -26,9 +26,9 @@ export function WalletPage() {
       setWallet(data)
       setWalletError('')
     } catch (err: unknown) {
-      const status = (err as { response?: { status?: number } }).response?.status
-      if (status !== 404) {
-        setWalletError('Failed to load wallet')
+      const e = err as { response?: { status?: number; data?: { error?: string } } }
+      if (e.response?.status !== 404) {
+        setWalletError(e.response?.data?.error ?? 'Failed to load wallet')
       }
     } finally {
       setWalletLoading(false)
