@@ -11,7 +11,7 @@ interface WalletInfo {
 interface Balances {
   eth: string | null
   usdt: string | null
-  usdc: string | null
+  san: string | null
   note?: string
 }
 
@@ -154,7 +154,7 @@ function BalancesCard({ address }: { address: string }) {
   const tokens = [
     { label: 'ETH', value: balances?.eth, symbol: 'ETH' },
     { label: 'USDT', value: balances?.usdt, symbol: 'USDT' },
-    { label: 'USDC', value: balances?.usdc, symbol: 'USDC' },
+    { label: 'SAN', value: balances?.san, symbol: 'SAN' },
   ]
 
   return (
@@ -252,12 +252,12 @@ function SignMessageCard({ walletId }: { walletId: string }) {
   )
 }
 
-type SendMode = 'eth' | 'usdt' | 'usdc'
+type SendMode = 'eth' | 'usdt' | 'san'
 
 const SEND_LABELS: Record<SendMode, string> = {
   eth: 'ETH',
   usdt: 'USDT',
-  usdc: 'USDC',
+  san: 'SAN',
 }
 
 function SendCard() {
@@ -302,7 +302,7 @@ function SendCard() {
     <div className="bg-white border border-gray-100 rounded-2xl p-6">
       <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Send Tokens</h2>
       <div className="flex gap-1 mb-5 bg-gray-50 p-1 rounded-lg w-fit">
-        {(['eth', 'usdt', 'usdc'] as SendMode[]).map(m => (
+        {(['eth', 'usdt', 'san'] as SendMode[]).map(m => (
           <button
             key={m}
             onClick={() => { setMode(m); setTxHash(''); setError('') }}

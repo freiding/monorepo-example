@@ -12,7 +12,7 @@ const ERC20_IFACE = new Interface(ERC20_TRANSFER_ABI)
 
 const TOKENS = {
   USDT: { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', decimals: 6 },
-  USDC: { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', decimals: 6 },
+  SAN: { address: '0x7c5a0ce9267ed19b22f8cae653f198e3e8daf098', decimals: 18 },
 } as const
 
 async function ssoFetch(userId: string, path: string, init: RequestInit = {}): Promise<Response> {
@@ -118,7 +118,7 @@ walletRouter.post('/send', async (req, res) => {
 // POST /api/wallet/send/token — send ERC-20 token (USDT or USDC)
 // Encodes the transfer calldata here and calls the generic SSO send endpoint.
 const sendTokenSchema = z.object({
-  token: z.enum(['USDT', 'USDC']),
+  token: z.enum(['USDT', 'SAN']),
   to: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid Ethereum address'),
   amount: z.string().regex(/^\d+(\.\d+)?$/, 'Invalid amount'),
   caip2: z.string().regex(/^eip155:\d+$/).optional(),
