@@ -91,7 +91,7 @@ async function exchangeCodeForUserinfo(
   code: string,
   codeVerifier: string,
   redirectUri: string,
-): Promise<{ userinfo: SsoUserinfo } | { error: string; status: number }> {
+): Promise<{ userinfo: SsoUserinfo; accessToken: string; refreshToken: string | null } | { error: string; status: number }> {
   const ssoIssuer = process.env.SSO_ISSUER
   const clientId = process.env.SSO_CLIENT_ID
   const clientSecret = process.env.SSO_CLIENT_SECRET
@@ -101,6 +101,7 @@ async function exchangeCodeForUserinfo(
   }
 
   let accessToken: string
+  let refreshToken: string | null
   try {
     const tokenRes = await fetch(`${ssoIssuer}/oauth/token`, {
       method: 'POST',
@@ -118,14 +119,15 @@ async function exchangeCodeForUserinfo(
       const body = await tokenRes.text()
       return { error: `SSO token exchange failed: ${body}`, status: 400 }
     }
-    const data = await tokenRes.json() as { access_token: string }
+    const data = await tokenRes.json() as { access_token: string; refresh_token?: string }
     accessToken = data.access_token
+    refreshToken = data.refresh_token ?? null
   } catch {
     return { error: 'Could not reach SSO server', status: 502 }
   }
 
   try {
-    const userinfoRes = await fetch(`${process.env.SSO_ISSUER}/oauth/userinfo`, {
+    const userinfoRes = await fetch(`${ssoIssuer}/oauth/userinfo`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     })
     if (!userinfoRes.ok) {
@@ -136,7 +138,7 @@ async function exchangeCodeForUserinfo(
     if (!userinfo.email) {
       return { error: 'SSO did not return an email address', status: 400 }
     }
-    return { userinfo }
+    return { userinfo, accessToken, refreshToken }
   } catch {
     return { error: 'Could not reach SSO server', status: 502 }
   }
@@ -169,7 +171,7 @@ authRouter.post('/sso/exchange', async (req, res) => {
     res.status(outcome.status).json({ error: outcome.error })
     return
   }
-  const { userinfo } = outcome
+  const { userinfo, accessToken: ssoAccessToken, refreshToken: ssoRefreshToken } = outcome
 
   let user =
     (await prisma.user.findUnique({ where: { ssoId: userinfo.sub } })) ??
@@ -180,18 +182,23 @@ authRouter.post('/sso/exchange', async (req, res) => {
       ? !(await prisma.user.findUnique({ where: { username: ssoUsername } }))
       : false
     user = await prisma.user.create({
-      data: { email: userinfo.email, ssoId: userinfo.sub, password: null, username: usernameAvailable ? ssoUsername : null },
+      data: {
+        email: userinfo.email,
+        ssoId: userinfo.sub,
+        password: null,
+        username: usernameAvailable ? ssoUsername : null,
+        ssoAccessToken,
+        ssoRefreshToken,
+      },
     })
   } else {
-    const updates: Record<string, string | null> = {}
+    const updates: Record<string, string | null> = { ssoAccessToken, ssoRefreshToken }
     if (!user.ssoId) updates.ssoId = userinfo.sub
     if (!user.username && ssoUsername) {
       const usernameAvailable = !(await prisma.user.findUnique({ where: { username: ssoUsername } }))
       if (usernameAvailable) updates.username = ssoUsername
     }
-    if (Object.keys(updates).length > 0) {
-      user = await prisma.user.update({ where: { id: user.id }, data: updates })
-    }
+    user = await prisma.user.update({ where: { id: user.id }, data: updates })
   }
 
   const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET!, { expiresIn: '7d' })

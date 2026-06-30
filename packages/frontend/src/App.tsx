@@ -4,6 +4,7 @@ import { LoginPage } from './pages/LoginPage'
 import { RegisterPage } from './pages/RegisterPage'
 import { TasksPage } from './pages/TasksPage'
 import { ProfilePage } from './pages/ProfilePage'
+import { WalletPage } from './pages/WalletPage'
 import { SsoCallbackPage } from './pages/SsoCallbackPage'
 import { Layout } from './components/Layout'
 
@@ -27,6 +28,7 @@ function AppRoutes() {
       <Route path="/auth/callback" element={<SsoCallbackPage />} />
       <Route path="/tasks" element={<PrivateRoute><Layout><TasksPage /></Layout></PrivateRoute>} />
       <Route path="/profile" element={<PrivateRoute><Layout><ProfilePage /></Layout></PrivateRoute>} />
+      <Route path="/wallet" element={<PrivateRoute><Layout><WalletPage /></Layout></PrivateRoute>} />
       <Route path="*" element={<Navigate to="/tasks" replace />} />
     </Routes>
   )

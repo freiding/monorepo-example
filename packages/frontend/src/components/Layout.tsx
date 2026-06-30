@@ -24,6 +24,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <span className="font-semibold text-gray-900">TaskApp</span>
             <Link to="/tasks" className={linkClass('/tasks')}>Tasks</Link>
             <Link to="/profile" className={linkClass('/profile')}>Profile</Link>
+            <Link to="/wallet" className={linkClass('/wallet')}>Wallet</Link>
           </div>
           <div className="flex items-center gap-4">
             {user?.avatar && (

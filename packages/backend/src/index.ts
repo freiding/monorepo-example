@@ -4,6 +4,7 @@ import path from 'path'
 import { authRouter } from './routes/auth'
 import { tasksRouter } from './routes/tasks'
 import { profileRouter } from './routes/profile'
+import { walletRouter } from './routes/wallet'
 
 const app = express()
 const PORT = process.env.PORT || 3000
@@ -15,6 +16,7 @@ app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')))
 app.use('/api/auth', authRouter)
 app.use('/api/tasks', tasksRouter)
 app.use('/api/profile', profileRouter)
+app.use('/api/wallet', walletRouter)
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`)
