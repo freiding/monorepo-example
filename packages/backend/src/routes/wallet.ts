@@ -23,6 +23,29 @@ const TOKENS = {
 
 const ARENA_STAKING_ADDRESS = '0xE20eD42dfb2957614b524B368FF74464a091C062'
 
+// Polls eth_getTransactionReceipt until the tx is mined or timeout is reached.
+// Throws if the tx reverted (status 0x0) or timed out.
+async function waitForReceipt(txHash: string, timeoutMs = 120_000): Promise<void> {
+  const rpcUrl = process.env.ETH_RPC_URL
+  if (!rpcUrl) throw Object.assign(new Error('ETH_RPC_URL is required for staking'), { status: 501 })
+
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const resp = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_getTransactionReceipt', params: [txHash], id: 1 }),
+    })
+    const json = await resp.json() as { result: { status: string } | null }
+    if (json.result) {
+      if (json.result.status === '0x0') throw Object.assign(new Error('Approve transaction reverted on-chain'), { status: 400 })
+      return
+    }
+    await new Promise(r => setTimeout(r, 3000))
+  }
+  throw Object.assign(new Error('Approve transaction not confirmed within 120s'), { status: 504 })
+}
+
 function getSsoIssuer() {
   const ssoIssuer = process.env.SSO_ISSUER
   if (!ssoIssuer) throw Object.assign(new Error('SSO_ISSUER is not configured'), { status: 501 })
@@ -196,9 +219,19 @@ walletRouter.post('/stake/deposit', async (req, res) => {
       body: JSON.stringify({ to: TOKENS.SAN.address, value: '0', data: approveData, caip2 }),
     })
     if (approveResult.status !== 200) {
-      res.status(approveResult.status).json({ step: 'approve', error: (approveResult.body as { error?: string }).error })
+      const b = approveResult.body as { message?: string }
+      res.status(approveResult.status).json({ step: 'approve', error: b.message ?? 'approve failed' })
       return
     }
+
+    const approveBody = approveResult.body as { transactionHash?: string }
+    if (!approveBody.transactionHash) {
+      res.status(502).json({ step: 'approve', error: 'No transaction hash returned from approve' })
+      return
+    }
+
+    // Wait for approve to be mined before deposit — Privy simulates against current chain state
+    await waitForReceipt(approveBody.transactionHash)
 
     // Step 2: call deposit(provider, amount) on staking contract
     const depositData = STAKING_IFACE.encodeFunctionData('deposit', [provider, amountWei])
@@ -207,13 +240,12 @@ walletRouter.post('/stake/deposit', async (req, res) => {
       body: JSON.stringify({ to: ARENA_STAKING_ADDRESS, value: '0', data: depositData, caip2 }),
     })
 
-    const approveBody = approveResult.body as { transactionHash?: string }
-    const depositBody = depositResult.body as { transactionHash?: string; error?: string }
+    const depositBody = depositResult.body as { transactionHash?: string; message?: string }
 
     res.status(depositResult.status).json({
       approveTxHash: approveBody.transactionHash,
       depositTxHash: depositBody.transactionHash,
-      ...(depositResult.status !== 200 ? { step: 'deposit', error: depositBody.error } : {}),
+      ...(depositResult.status !== 200 ? { step: 'deposit', error: depositBody.message ?? 'deposit failed' } : {}),
     })
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string }

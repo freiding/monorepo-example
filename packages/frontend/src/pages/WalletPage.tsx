@@ -388,6 +388,7 @@ function StakeDepositCard() {
   const [provider, setProvider] = useState('')
   const [amount, setAmount] = useState('')
   const [loading, setLoading] = useState(false)
+  const [stage, setStage] = useState<'idle' | 'approving' | 'waiting' | 'depositing'>('idle')
   const [error, setError] = useState('')
   const [result, setResult] = useState<{ approveTxHash: string; depositTxHash: string } | null>(null)
 
@@ -396,10 +397,15 @@ function StakeDepositCard() {
     setError('')
     setResult(null)
     setLoading(true)
+    setStage('approving')
     try {
+      // The backend sends approve, waits for confirmation, then sends deposit.
+      // This can take 30-60s on mainnet.
+      setStage('waiting')
       const { data } = await api.post<{ approveTxHash: string; depositTxHash: string }>(
         '/api/wallet/stake/deposit',
         { provider, amount },
+        { timeout: 180_000 },
       )
       setResult(data)
     } catch (err: unknown) {
@@ -407,7 +413,15 @@ function StakeDepositCard() {
       setError(e.response?.data?.error ?? 'Deposit failed')
     } finally {
       setLoading(false)
+      setStage('idle')
     }
+  }
+
+  const stageLabel: Record<typeof stage, string> = {
+    idle: 'Approve & Deposit',
+    approving: 'Sending approve…',
+    waiting: 'Waiting for approve confirmation…',
+    depositing: 'Sending deposit…',
   }
 
   return (
@@ -445,7 +459,7 @@ function StakeDepositCard() {
           disabled={loading}
           className="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
         >
-          {loading ? 'Depositing...' : 'Approve & Deposit'}
+          {stageLabel[stage]}
         </button>
       </form>
 
