@@ -15,26 +15,76 @@ const TOKENS = {
   SAN: { address: '0x7c5a0ce9267ed19b22f8cae653f198e3e8daf098', decimals: 18 },
 } as const
 
-async function ssoFetch(userId: string, path: string, init: RequestInit = {}): Promise<Response> {
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { ssoAccessToken: true } })
-  if (!user?.ssoAccessToken) {
-    throw Object.assign(new Error('No SSO access token — please log in via SSO'), { status: 401 })
-  }
+function getSsoIssuer() {
   const ssoIssuer = process.env.SSO_ISSUER
   if (!ssoIssuer) throw Object.assign(new Error('SSO_ISSUER is not configured'), { status: 501 })
+  return ssoIssuer
+}
 
-  return fetch(`${ssoIssuer}${path}`, {
+async function refreshSsoToken(userId: string): Promise<string> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { ssoRefreshToken: true },
+  })
+  if (!user?.ssoRefreshToken) {
+    throw Object.assign(new Error('No SSO refresh token — please log in via SSO again'), { status: 401 })
+  }
+
+  const ssoIssuer = getSsoIssuer()
+  const resp = await fetch(`${ssoIssuer}/oauth/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: user.ssoRefreshToken,
+      client_id: process.env.SSO_CLIENT_ID!,
+      client_secret: process.env.SSO_CLIENT_SECRET!,
+    }),
+  })
+
+  if (!resp.ok) {
+    const body = await resp.text()
+    console.error('[wallet proxy] token refresh failed', resp.status, body)
+    throw Object.assign(new Error('SSO token refresh failed — please log in again'), { status: 401 })
+  }
+
+  const data = await resp.json() as { access_token: string; refresh_token?: string }
+  await prisma.user.update({
+    where: { id: userId },
+    data: { ssoAccessToken: data.access_token, ssoRefreshToken: data.refresh_token ?? user.ssoRefreshToken },
+  })
+  return data.access_token
+}
+
+async function ssoFetch(userId: string, path: string, init: RequestInit = {}, accessToken?: string): Promise<Response> {
+  const token = accessToken ?? (await prisma.user.findUnique({
+    where: { id: userId },
+    select: { ssoAccessToken: true },
+  }))?.ssoAccessToken
+
+  if (!token) {
+    throw Object.assign(new Error('No SSO access token — please log in via SSO'), { status: 401 })
+  }
+
+  return fetch(`${getSsoIssuer()}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
       ...(init.headers as Record<string, string> | undefined),
-      Authorization: `Bearer ${user.ssoAccessToken}`,
+      Authorization: `Bearer ${token}`,
     },
   })
 }
 
 async function proxyToSso(userId: string, path: string, init: RequestInit = {}) {
-  const resp = await ssoFetch(userId, path, init)
+  let resp = await ssoFetch(userId, path, init)
+
+  // access token expired — refresh once and retry
+  if (resp.status === 401) {
+    const newToken = await refreshSsoToken(userId)
+    resp = await ssoFetch(userId, path, init, newToken)
+  }
+
   const body = await resp.json().catch(() => ({ error: 'SSO returned non-JSON response' }))
   if (!resp.ok) console.error(`[wallet proxy] SSO ${init.method ?? 'GET'} ${path} → ${resp.status}`, body)
   return { status: resp.status, body }
