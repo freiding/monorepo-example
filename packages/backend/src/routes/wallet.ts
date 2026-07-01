@@ -7,13 +7,21 @@ import { requireAuth } from '../middleware/auth'
 export const walletRouter = Router()
 walletRouter.use(requireAuth)
 
-const ERC20_TRANSFER_ABI = ['function transfer(address to, uint256 amount) returns (bool)']
-const ERC20_IFACE = new Interface(ERC20_TRANSFER_ABI)
+const ERC20_IFACE = new Interface([
+  'function transfer(address to, uint256 amount) returns (bool)',
+  'function approve(address spender, uint256 amount) returns (bool)',
+])
+
+const STAKING_IFACE = new Interface([
+  'function deposit(address provider, uint256 amount)',
+])
 
 const TOKENS = {
   USDT: { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', decimals: 6 },
   SAN: { address: '0x7c5a0ce9267ed19b22f8cae653f198e3e8daf098', decimals: 18 },
 } as const
+
+const ARENA_STAKING_ADDRESS = '0xE20eD42dfb2957614b524B368FF74464a091C062'
 
 function getSsoIssuer() {
   const ssoIssuer = process.env.SSO_ISSUER
@@ -165,7 +173,55 @@ walletRouter.post('/send', async (req, res) => {
   }
 })
 
-// POST /api/wallet/send/token — send ERC-20 token (USDT or USDC)
+// POST /api/wallet/stake/deposit — approve SAN + call deposit(provider, amount) on Arena Staking
+// Two sequential txs: approve staking contract to spend SAN, then deposit.
+const stakeDepositSchema = z.object({
+  provider: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid provider address'),
+  amount: z.string().regex(/^\d+(\.\d+)?$/, 'Invalid amount'),
+  caip2: z.string().regex(/^eip155:\d+$/).optional(),
+})
+
+walletRouter.post('/stake/deposit', async (req, res) => {
+  const parsed = stakeDepositSchema.safeParse(req.body)
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.errors[0].message }); return }
+
+  const { provider, amount, caip2 = 'eip155:1' } = parsed.data
+  const amountWei = parseUnits(amount, TOKENS.SAN.decimals)
+
+  try {
+    // Step 1: approve staking contract to spend SAN
+    const approveData = ERC20_IFACE.encodeFunctionData('approve', [ARENA_STAKING_ADDRESS, amountWei])
+    const approveResult = await proxyToSso(req.userId!, '/privy/wallet/send', {
+      method: 'POST',
+      body: JSON.stringify({ to: TOKENS.SAN.address, value: '0', data: approveData, caip2 }),
+    })
+    if (approveResult.status !== 200) {
+      res.status(approveResult.status).json({ step: 'approve', error: (approveResult.body as { error?: string }).error })
+      return
+    }
+
+    // Step 2: call deposit(provider, amount) on staking contract
+    const depositData = STAKING_IFACE.encodeFunctionData('deposit', [provider, amountWei])
+    const depositResult = await proxyToSso(req.userId!, '/privy/wallet/send', {
+      method: 'POST',
+      body: JSON.stringify({ to: ARENA_STAKING_ADDRESS, value: '0', data: depositData, caip2 }),
+    })
+
+    const approveBody = approveResult.body as { transactionHash?: string }
+    const depositBody = depositResult.body as { transactionHash?: string; error?: string }
+
+    res.status(depositResult.status).json({
+      approveTxHash: approveBody.transactionHash,
+      depositTxHash: depositBody.transactionHash,
+      ...(depositResult.status !== 200 ? { step: 'deposit', error: depositBody.error } : {}),
+    })
+  } catch (err: unknown) {
+    const e = err as { status?: number; message?: string }
+    res.status(e.status ?? 502).json({ error: e.message ?? 'Failed to reach SSO' })
+  }
+})
+
+// POST /api/wallet/send/token — send ERC-20 token (USDT or SAN)
 // Encodes the transfer calldata here and calls the generic SSO send endpoint.
 const sendTokenSchema = z.object({
   token: z.enum(['USDT', 'SAN']),

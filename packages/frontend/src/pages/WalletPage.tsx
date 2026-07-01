@@ -70,6 +70,7 @@ export function WalletPage() {
           <BalancesCard address={wallet.address} />
           <SignMessageCard walletId={wallet.privyWalletId} />
           <SendCard />
+          <StakeDepositCard />
         </>
       )}
     </div>
@@ -375,6 +376,99 @@ function SendCard() {
           >
             Copy hash
           </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const ARENA_STAKING_ADDRESS = '0xE20eD42dfb2957614b524B368FF74464a091C062'
+
+function StakeDepositCard() {
+  const [provider, setProvider] = useState('')
+  const [amount, setAmount] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [result, setResult] = useState<{ approveTxHash: string; depositTxHash: string } | null>(null)
+
+  async function handleDeposit(e: React.FormEvent) {
+    e.preventDefault()
+    setError('')
+    setResult(null)
+    setLoading(true)
+    try {
+      const { data } = await api.post<{ approveTxHash: string; depositTxHash: string }>(
+        '/api/wallet/stake/deposit',
+        { provider, amount },
+      )
+      setResult(data)
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } }
+      setError(e.response?.data?.error ?? 'Deposit failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-2xl p-6">
+      <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-1">Arena Staking — Deposit SAN</h2>
+      <p className="text-xs text-gray-400 mb-4">
+        Contract: <span className="font-mono">{ARENA_STAKING_ADDRESS.slice(0, 10)}…{ARENA_STAKING_ADDRESS.slice(-8)}</span>
+        {' · '}Two transactions: approve + deposit
+      </p>
+      <form onSubmit={handleDeposit} className="space-y-3">
+        <div>
+          <label className="block text-sm font-medium mb-1.5">Provider Address</label>
+          <input
+            value={provider}
+            onChange={e => setProvider(e.target.value)}
+            placeholder="0x..."
+            pattern="^0x[a-fA-F0-9]{40}$"
+            required
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1.5">Amount (SAN)</label>
+          <input
+            value={amount}
+            onChange={e => setAmount(e.target.value)}
+            placeholder="100"
+            pattern="^\d+(\.\d+)?$"
+            required
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          />
+        </div>
+        <button
+          type="submit"
+          disabled={loading}
+          className="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+        >
+          {loading ? 'Depositing...' : 'Approve & Deposit'}
+        </button>
+      </form>
+
+      {error && <p className="text-sm text-red-500 mt-3">{error}</p>}
+      {result && (
+        <div className="mt-4 space-y-2">
+          {[
+            { label: 'Approve Tx', hash: result.approveTxHash },
+            { label: 'Deposit Tx', hash: result.depositTxHash },
+          ].map(({ label, hash }) => (
+            <div key={label}>
+              <p className="text-xs text-gray-400 mb-1">{label}</p>
+              <div className="bg-green-50 border border-green-100 rounded-lg px-3 py-2 font-mono text-xs break-all text-green-800 flex items-center justify-between gap-2">
+                <span className="truncate">{hash}</span>
+                <button
+                  onClick={() => navigator.clipboard.writeText(hash)}
+                  className="text-blue-600 hover:underline shrink-0"
+                >
+                  Copy
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
