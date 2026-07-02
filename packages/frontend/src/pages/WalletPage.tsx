@@ -576,7 +576,14 @@ function ExternalWalletCard({
       <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">External Wallet (MetaMask / EIP-1193)</h2>
       {!account ? (
         <div className="text-center py-4">
-          <p className="text-sm text-gray-400 mb-4">Connect MetaMask or any EIP-1193 browser wallet.</p>
+          {user?.walletAddress && (
+            <p className="text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 mb-4 font-mono break-all">
+              Connect: {user.walletAddress}
+            </p>
+          )}
+          {!user?.walletAddress && (
+            <p className="text-sm text-gray-400 mb-4">Connect MetaMask or any EIP-1193 browser wallet.</p>
+          )}
           <button
             onClick={connectWallet}
             disabled={connecting}
