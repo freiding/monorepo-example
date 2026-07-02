@@ -32,7 +32,7 @@ export function LoginPage() {
       client_id: ssoConfig.clientId!,
       redirect_uri: redirectUri,
       response_type: 'code',
-      scope: 'openid profile email',
+      scope: 'openid profile email wallet',
       code_challenge: challenge,
       code_challenge_method: 'S256',
       state,

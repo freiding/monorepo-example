@@ -86,6 +86,8 @@ interface SsoUserinfo {
   email?: string
   name?: string
   username?: string
+  wallet_address?: string       // external wallet (MetaMask/WalletConnect)
+  privy_wallet_address?: string // Privy embedded wallet
 }
 
 async function exchangeCodeForUserinfo(
@@ -178,6 +180,8 @@ authRouter.post('/sso/exchange', async (req, res) => {
   }
 
   const ssoUsername = resolveSsoUsername(userinfo.username ?? null)
+  const ssoWalletAddress = userinfo.wallet_address?.toLowerCase() ?? null
+
   if (!user) {
     const usernameAvailable = ssoUsername
       ? !(await prisma.user.findUnique({ where: { username: ssoUsername } }))
@@ -185,6 +189,7 @@ authRouter.post('/sso/exchange', async (req, res) => {
     user = await prisma.user.create({
       data: {
         email: userinfo.email ?? null,
+        walletAddress: ssoWalletAddress,
         ssoId: userinfo.sub,
         password: null,
         username: usernameAvailable ? ssoUsername : null,
@@ -196,6 +201,7 @@ authRouter.post('/sso/exchange', async (req, res) => {
     const updates: Record<string, string | null> = { ssoAccessToken, ssoRefreshToken }
     if (!user.ssoId) updates.ssoId = userinfo.sub
     if (!user.email && userinfo.email) updates.email = userinfo.email
+    if (!user.walletAddress && ssoWalletAddress) updates.walletAddress = ssoWalletAddress
     if (!user.username && ssoUsername) {
       const usernameAvailable = !(await prisma.user.findUnique({ where: { username: ssoUsername } }))
       if (usernameAvailable) updates.username = ssoUsername
@@ -204,7 +210,7 @@ authRouter.post('/sso/exchange', async (req, res) => {
   }
 
   const token = jwt.sign({ userId: user!.id }, process.env.JWT_SECRET!, { expiresIn: '7d' })
-  res.json({ token, user: { id: user!.id, email: user!.email, username: user!.username, avatar: user!.avatar } })
+  res.json({ token, user: { id: user!.id, email: user!.email, walletAddress: user!.walletAddress, username: user!.username, avatar: user!.avatar } })
 })
 
 authRouter.post('/sso/migrate', requireAuth, async (req, res) => {
