@@ -182,7 +182,6 @@ authRouter.post('/sso/exchange', async (req, res) => {
     const usernameAvailable = ssoUsername
       ? !(await prisma.user.findUnique({ where: { username: ssoUsername } }))
       : false
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     user = await prisma.user.create({
       data: {
         email: userinfo.email ?? null,
@@ -191,7 +190,7 @@ authRouter.post('/sso/exchange', async (req, res) => {
         username: usernameAvailable ? ssoUsername : null,
         ssoAccessToken,
         ssoRefreshToken,
-      } as any,
+      },
     })
   } else {
     const updates: Record<string, string | null> = { ssoAccessToken, ssoRefreshToken }
@@ -298,13 +297,11 @@ authRouter.post('/wallet/verify', async (req, res) => {
     return
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let user = await prisma.user.findUnique({ where: { walletAddress: key } as any })
+  let user = await prisma.user.findUnique({ where: { walletAddress: key } })
   if (!user) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    user = await prisma.user.create({ data: { walletAddress: key } as any })
+    user = await prisma.user.create({ data: { walletAddress: key } })
   }
 
   const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET!, { expiresIn: '7d' })
-  res.json({ token, user: { id: user.id, email: user.email, username: user.username, avatar: user.avatar } })
+  res.json({ token, user: { id: user.id, email: user.email, walletAddress: user.walletAddress, username: user.username, avatar: user.avatar } })
 })
