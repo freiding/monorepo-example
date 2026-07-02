@@ -4,6 +4,7 @@ import { api } from '../api/client'
 export interface User {
   id: string
   email: string | null
+  walletAddress?: string | null
   username?: string | null
   avatar?: string | null
 }

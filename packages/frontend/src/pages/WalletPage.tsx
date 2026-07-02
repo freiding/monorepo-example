@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../api/client'
+import { useAuth } from '../context/AuthContext'
 
 interface WalletInfo {
   address: string
@@ -521,6 +522,7 @@ function ExternalWalletCard({
   account: string | null
   onConnect: (account: string | null) => void
 }) {
+  const { user } = useAuth()
   const [connecting, setConnecting] = useState(false)
   const [balance, setBalance] = useState<string | null>(null)
   const [error, setError] = useState('')
@@ -549,6 +551,12 @@ function ExternalWalletCard({
     try {
       const accounts = await window.ethereum.request<string[]>({ method: 'eth_requestAccounts' })
       const address = (accounts as string[])[0]
+
+      if (user?.walletAddress && address.toLowerCase() !== user.walletAddress.toLowerCase()) {
+        setError(`Wrong wallet: expected ${user.walletAddress.slice(0, 6)}…${user.walletAddress.slice(-4)}, got ${address.slice(0, 6)}…${address.slice(-4)}`)
+        return
+      }
+
       onConnect(address)
       await fetchBalance(address)
     } catch (err: unknown) {
