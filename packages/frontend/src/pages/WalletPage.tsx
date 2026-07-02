@@ -17,11 +17,15 @@ interface Balances {
 }
 
 export function WalletPage() {
+  const { user } = useAuth()
   const [wallet, setWallet] = useState<WalletInfo | null>(null)
   const [walletLoading, setWalletLoading] = useState(true)
   const [walletError, setWalletError] = useState('')
 
   const [externalAccount, setExternalAccount] = useState<string | null>(null)
+
+  const requiredAddress = user?.walletAddress ?? null
+  const isCorrectWallet = !externalAccount || !requiredAddress || externalAccount.toLowerCase() === requiredAddress.toLowerCase()
 
   const fetchWallet = useCallback(async () => {
     try {
@@ -87,7 +91,7 @@ export function WalletPage() {
 
       <ExternalWalletCard account={externalAccount} onConnect={setExternalAccount} />
 
-      {externalAccount && (
+      {externalAccount && isCorrectWallet && (
         <>
           <ExternalSignCard account={externalAccount} />
           <ExternalSendCard account={externalAccount} />
@@ -527,6 +531,9 @@ function ExternalWalletCard({
   const [balance, setBalance] = useState<string | null>(null)
   const [error, setError] = useState('')
 
+  const requiredAddress = user?.walletAddress ?? null
+  const isWrongWallet = !!(account && requiredAddress && account.toLowerCase() !== requiredAddress.toLowerCase())
+
   async function fetchBalance(address: string) {
     if (!window.ethereum) return
     try {
@@ -551,12 +558,6 @@ function ExternalWalletCard({
     try {
       const accounts = await window.ethereum.request<string[]>({ method: 'eth_requestAccounts' })
       const address = (accounts as string[])[0]
-
-      if (user?.walletAddress && address.toLowerCase() !== user.walletAddress.toLowerCase()) {
-        setError(`Wrong wallet: expected ${user.walletAddress.slice(0, 6)}…${user.walletAddress.slice(-4)}, got ${address.slice(0, 6)}…${address.slice(-4)}`)
-        return
-      }
-
       onConnect(address)
       await fetchBalance(address)
     } catch (err: unknown) {
@@ -567,21 +568,43 @@ function ExternalWalletCard({
     }
   }
 
-  function copyAddress() {
-    if (account) navigator.clipboard.writeText(account)
+  function disconnect() {
+    onConnect(null)
+    setBalance(null)
+    setError('')
   }
 
   return (
-    <div className="bg-white border border-gray-100 rounded-2xl p-6">
+    <div className={`bg-white border rounded-2xl p-6 ${isWrongWallet ? 'border-red-200' : 'border-gray-100'}`}>
       <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">External Wallet (MetaMask / EIP-1193)</h2>
-      {!account ? (
+
+      {/* Wrong wallet stub */}
+      {isWrongWallet && (
+        <div className="bg-red-50 border border-red-100 rounded-xl p-5 text-center">
+          <p className="text-sm font-medium text-red-700 mb-2">Wrong wallet connected</p>
+          <p className="text-xs text-red-500 mb-1">Connected:</p>
+          <p className="font-mono text-xs text-red-600 bg-red-100 rounded-lg px-3 py-1.5 mb-4 break-all">{account}</p>
+          <p className="text-xs text-gray-500 mb-1">Please connect:</p>
+          <p className="font-mono text-xs text-gray-700 bg-gray-100 rounded-lg px-3 py-1.5 mb-4 break-all">{requiredAddress}</p>
+          <button
+            onClick={disconnect}
+            className="bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-600 transition-colors"
+          >
+            Disconnect and try again
+          </button>
+        </div>
+      )}
+
+      {/* Not connected */}
+      {!account && (
         <div className="text-center py-4">
-          {user?.walletAddress && (
-            <p className="text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 mb-4 font-mono break-all">
-              Connect: {user.walletAddress}
-            </p>
+          {requiredAddress && (
+            <div className="mb-4">
+              <p className="text-xs text-gray-400 mb-1">Required address</p>
+              <p className="font-mono text-xs text-gray-600 bg-gray-50 border border-gray-100 rounded-lg px-3 py-1.5 break-all">{requiredAddress}</p>
+            </div>
           )}
-          {!user?.walletAddress && (
+          {!requiredAddress && (
             <p className="text-sm text-gray-400 mb-4">Connect MetaMask or any EIP-1193 browser wallet.</p>
           )}
           <button
@@ -593,7 +616,10 @@ function ExternalWalletCard({
           </button>
           {error && <p className="text-sm text-red-500 mt-3">{error}</p>}
         </div>
-      ) : (
+      )}
+
+      {/* Connected and correct */}
+      {account && !isWrongWallet && (
         <div className="space-y-3">
           <div>
             <p className="text-xs text-gray-400 mb-1">Address</p>
@@ -602,13 +628,13 @@ function ExternalWalletCard({
                 {account}
               </span>
               <button
-                onClick={copyAddress}
+                onClick={() => navigator.clipboard.writeText(account)}
                 className="text-xs text-blue-600 hover:text-blue-800 px-2 py-1.5 rounded hover:bg-blue-50 transition-colors shrink-0"
               >
                 Copy
               </button>
               <button
-                onClick={() => { onConnect(null); setBalance(null) }}
+                onClick={disconnect}
                 className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1.5 rounded hover:bg-gray-50 transition-colors shrink-0"
               >
                 Disconnect
@@ -619,7 +645,6 @@ function ExternalWalletCard({
             <p className="text-xs text-gray-400 mb-1">ETH Balance</p>
             <p className="font-mono text-sm">{balance !== null ? `${balance} ETH` : '—'}</p>
           </div>
-          {error && <p className="text-sm text-red-500">{error}</p>}
         </div>
       )}
     </div>
