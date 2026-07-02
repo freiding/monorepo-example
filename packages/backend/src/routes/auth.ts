@@ -2,6 +2,7 @@ import { Router } from 'express'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { z } from 'zod'
+import { verifyMessage } from 'ethers'
 import { prisma } from '../lib/prisma'
 import { requireAuth } from '../middleware/auth'
 
@@ -82,7 +83,7 @@ authRouter.get('/sso/config', (_req, res) => {
 
 interface SsoUserinfo {
   sub: string
-  email: string
+  email?: string
   name?: string
   username?: string
 }
@@ -135,9 +136,6 @@ async function exchangeCodeForUserinfo(
     }
     const userinfo = await userinfoRes.json() as SsoUserinfo
     console.log('[SSO userinfo]', JSON.stringify(userinfo))
-    if (!userinfo.email) {
-      return { error: 'SSO did not return an email address', status: 400 }
-    }
     return { userinfo, accessToken, refreshToken }
   } catch {
     return { error: 'Could not reach SSO server', status: 502 }
@@ -173,27 +171,32 @@ authRouter.post('/sso/exchange', async (req, res) => {
   }
   const { userinfo, accessToken: ssoAccessToken, refreshToken: ssoRefreshToken } = outcome
 
-  let user =
-    (await prisma.user.findUnique({ where: { ssoId: userinfo.sub } })) ??
-    (await prisma.user.findUnique({ where: { email: userinfo.email } }))
+  // Look up by ssoId first, then by email only if email is present
+  let user = await prisma.user.findUnique({ where: { ssoId: userinfo.sub } })
+  if (!user && userinfo.email) {
+    user = await prisma.user.findUnique({ where: { email: userinfo.email } })
+  }
+
   const ssoUsername = resolveSsoUsername(userinfo.username ?? null)
   if (!user) {
     const usernameAvailable = ssoUsername
       ? !(await prisma.user.findUnique({ where: { username: ssoUsername } }))
       : false
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     user = await prisma.user.create({
       data: {
-        email: userinfo.email,
+        email: userinfo.email ?? null,
         ssoId: userinfo.sub,
         password: null,
         username: usernameAvailable ? ssoUsername : null,
         ssoAccessToken,
         ssoRefreshToken,
-      },
+      } as any,
     })
   } else {
     const updates: Record<string, string | null> = { ssoAccessToken, ssoRefreshToken }
     if (!user.ssoId) updates.ssoId = userinfo.sub
+    if (!user.email && userinfo.email) updates.email = userinfo.email
     if (!user.username && ssoUsername) {
       const usernameAvailable = !(await prisma.user.findUnique({ where: { username: ssoUsername } }))
       if (usernameAvailable) updates.username = ssoUsername
@@ -201,8 +204,8 @@ authRouter.post('/sso/exchange', async (req, res) => {
     user = await prisma.user.update({ where: { id: user.id }, data: updates })
   }
 
-  const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET!, { expiresIn: '7d' })
-  res.json({ token, user: { id: user.id, email: user.email, username: user.username, avatar: user.avatar } })
+  const token = jwt.sign({ userId: user!.id }, process.env.JWT_SECRET!, { expiresIn: '7d' })
+  res.json({ token, user: { id: user!.id, email: user!.email, username: user!.username, avatar: user!.avatar } })
 })
 
 authRouter.post('/sso/migrate', requireAuth, async (req, res) => {
@@ -232,4 +235,76 @@ authRouter.post('/sso/migrate', requireAuth, async (req, res) => {
   })
 
   res.json({ success: true, user: updated })
+})
+
+// --- Wallet authentication ---
+
+const walletNonces = new Map<string, { message: string; expiresAt: number }>()
+
+setInterval(() => {
+  const now = Date.now()
+  for (const [addr, data] of walletNonces) {
+    if (data.expiresAt < now) walletNonces.delete(addr)
+  }
+}, 60_000)
+
+const walletChallengeSchema = z.object({
+  address: z.string().regex(/^0x[a-fA-F0-9]{40}$/i, 'Invalid Ethereum address'),
+})
+
+authRouter.post('/wallet/challenge', async (req, res) => {
+  const result = walletChallengeSchema.safeParse(req.body)
+  if (!result.success) {
+    res.status(400).json({ error: result.error.errors[0].message })
+    return
+  }
+  const address = result.data.address.toLowerCase()
+  const nonce = crypto.randomUUID()
+  const message = `Sign this message to authenticate.\n\nNonce: ${nonce}`
+  walletNonces.set(address, { message, expiresAt: Date.now() + 5 * 60 * 1000 })
+  res.json({ message })
+})
+
+const walletVerifySchema = z.object({
+  address: z.string().regex(/^0x[a-fA-F0-9]{40}$/i, 'Invalid Ethereum address'),
+  signature: z.string(),
+})
+
+authRouter.post('/wallet/verify', async (req, res) => {
+  const result = walletVerifySchema.safeParse(req.body)
+  if (!result.success) {
+    res.status(400).json({ error: result.error.errors[0].message })
+    return
+  }
+  const { address, signature } = result.data
+  const key = address.toLowerCase()
+  const challenge = walletNonces.get(key)
+  if (!challenge || challenge.expiresAt < Date.now()) {
+    res.status(400).json({ error: 'Challenge expired or not found. Please try again.' })
+    return
+  }
+  walletNonces.delete(key)
+
+  let recovered: string
+  try {
+    recovered = verifyMessage(challenge.message, signature).toLowerCase()
+  } catch {
+    res.status(400).json({ error: 'Invalid signature' })
+    return
+  }
+
+  if (recovered !== key) {
+    res.status(401).json({ error: 'Signature does not match address' })
+    return
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let user = await prisma.user.findUnique({ where: { walletAddress: key } as any })
+  if (!user) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    user = await prisma.user.create({ data: { walletAddress: key } as any })
+  }
+
+  const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET!, { expiresIn: '7d' })
+  res.json({ token, user: { id: user.id, email: user.email, username: user.username, avatar: user.avatar } })
 })

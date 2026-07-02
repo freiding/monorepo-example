@@ -34,7 +34,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 className="w-7 h-7 rounded-full object-cover"
               />
             )}
-            <span className="text-sm text-gray-400">{user?.username || user?.email}</span>
+            <span className="text-sm text-gray-400">{user?.username || user?.email || 'User'}</span>
             <button
               onClick={handleLogout}
               className="text-sm text-red-400 hover:text-red-600 transition-colors"

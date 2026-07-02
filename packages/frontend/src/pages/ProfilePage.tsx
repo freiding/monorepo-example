@@ -28,7 +28,8 @@ export function ProfilePage() {
     setSuccess('')
     setLoading(true)
     try {
-      const payload: Record<string, string> = { username, email }
+      const payload: Record<string, string> = { username }
+      if (email) payload.email = email
       if (newPassword) {
         payload.currentPassword = currentPassword
         payload.newPassword = newPassword
@@ -112,7 +113,7 @@ export function ProfilePage() {
               type="email"
               value={email}
               onChange={e => setEmail(e.target.value)}
-              required
+              placeholder="Optional"
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
