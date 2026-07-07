@@ -33,7 +33,7 @@ authRouter.post('/register', async (req, res) => {
   const hashed = await bcrypt.hash(password, 10)
   const user = await prisma.user.create({ data: { email, password: hashed } })
   const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET!, { expiresIn: '7d' })
-  res.status(201).json({ token, user: { id: user.id, email: user.email, username: user.username, avatar: user.avatar } })
+  res.status(201).json({ token, user: { id: user.id, email: user.email, walletAddress: user.walletAddress, walletType: user.walletType, username: user.username, avatar: user.avatar } })
 })
 
 authRouter.post('/login', async (req, res) => {
@@ -57,13 +57,13 @@ authRouter.post('/login', async (req, res) => {
     return
   }
   const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET!, { expiresIn: '7d' })
-  res.json({ token, user: { id: user.id, email: user.email, username: user.username, avatar: user.avatar } })
+  res.json({ token, user: { id: user.id, email: user.email, walletAddress: user.walletAddress, walletType: user.walletType, username: user.username, avatar: user.avatar } })
 })
 
 authRouter.get('/me', requireAuth, async (req, res) => {
   const user = await prisma.user.findUnique({
     where: { id: req.userId },
-    select: { id: true, email: true, walletAddress: true, username: true, avatar: true, createdAt: true },
+    select: { id: true, email: true, walletAddress: true, walletType: true, username: true, avatar: true, createdAt: true },
   })
   if (!user) {
     res.status(404).json({ error: 'User not found' })
@@ -86,8 +86,8 @@ interface SsoUserinfo {
   email?: string
   name?: string
   username?: string
-  wallet_address?: string       // external wallet (MetaMask/WalletConnect)
-  privy_wallet_address?: string // Privy embedded wallet
+  wallet_address?: string                // present when user has any wallet (privy or external)
+  wallet_type?: 'privy' | 'external'    // present alongside wallet_address
 }
 
 async function exchangeCodeForUserinfo(
@@ -181,6 +181,7 @@ authRouter.post('/sso/exchange', async (req, res) => {
 
   const ssoUsername = resolveSsoUsername(userinfo.username ?? null)
   const ssoWalletAddress = userinfo.wallet_address?.toLowerCase() ?? null
+  const ssoWalletType = userinfo.wallet_type ?? null
 
   if (!user) {
     const usernameAvailable = ssoUsername
@@ -190,6 +191,7 @@ authRouter.post('/sso/exchange', async (req, res) => {
       data: {
         email: userinfo.email ?? null,
         walletAddress: ssoWalletAddress,
+        walletType: ssoWalletType,
         ssoId: userinfo.sub,
         password: null,
         username: usernameAvailable ? ssoUsername : null,
@@ -201,7 +203,13 @@ authRouter.post('/sso/exchange', async (req, res) => {
     const updates: Record<string, string | null> = { ssoAccessToken, ssoRefreshToken }
     if (!user.ssoId) updates.ssoId = userinfo.sub
     if (!user.email && userinfo.email) updates.email = userinfo.email
-    if (!user.walletAddress && ssoWalletAddress) updates.walletAddress = ssoWalletAddress
+    if (!user.walletAddress && ssoWalletAddress) {
+      updates.walletAddress = ssoWalletAddress
+      updates.walletType = ssoWalletType
+    } else if (user.walletAddress && ssoWalletType && user.walletType !== ssoWalletType) {
+      // wallet migrated (e.g. privy → external after key export)
+      updates.walletType = ssoWalletType
+    }
     if (!user.username && ssoUsername) {
       const usernameAvailable = !(await prisma.user.findUnique({ where: { username: ssoUsername } }))
       if (usernameAvailable) updates.username = ssoUsername
@@ -210,7 +218,7 @@ authRouter.post('/sso/exchange', async (req, res) => {
   }
 
   const token = jwt.sign({ userId: user!.id }, process.env.JWT_SECRET!, { expiresIn: '7d' })
-  res.json({ token, user: { id: user!.id, email: user!.email, walletAddress: user!.walletAddress, username: user!.username, avatar: user!.avatar } })
+  res.json({ token, user: { id: user!.id, email: user!.email, walletAddress: user!.walletAddress, walletType: user!.walletType, username: user!.username, avatar: user!.avatar } })
 })
 
 authRouter.post('/sso/migrate', requireAuth, async (req, res) => {
@@ -305,9 +313,9 @@ authRouter.post('/wallet/verify', async (req, res) => {
 
   let user = await prisma.user.findUnique({ where: { walletAddress: key } })
   if (!user) {
-    user = await prisma.user.create({ data: { walletAddress: key } })
+    user = await prisma.user.create({ data: { walletAddress: key, walletType: 'external' } })
   }
 
   const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET!, { expiresIn: '7d' })
-  res.json({ token, user: { id: user.id, email: user.email, walletAddress: user.walletAddress, username: user.username, avatar: user.avatar } })
+  res.json({ token, user: { id: user.id, email: user.email, walletAddress: user.walletAddress, walletType: user.walletType, username: user.username, avatar: user.avatar } })
 })

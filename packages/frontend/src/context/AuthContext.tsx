@@ -5,6 +5,7 @@ export interface User {
   id: string
   email: string | null
   walletAddress?: string | null
+  walletType?: 'privy' | 'external' | null
   username?: string | null
   avatar?: string | null
 }

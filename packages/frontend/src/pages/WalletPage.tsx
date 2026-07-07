@@ -24,7 +24,9 @@ export function WalletPage() {
 
   const [externalAccount, setExternalAccount] = useState<string | null>(null)
 
-  const requiredAddress = user?.walletAddress ?? null
+  // Only enforce a specific address for external wallets — Privy embedded wallets
+  // cannot be connected as MetaMask, so we don't require a particular address for them.
+  const requiredAddress = user?.walletType === 'external' ? (user?.walletAddress ?? null) : null
   const isCorrectWallet = !externalAccount || !requiredAddress || externalAccount.toLowerCase() === requiredAddress.toLowerCase()
 
   const fetchWallet = useCallback(async () => {
@@ -531,7 +533,7 @@ function ExternalWalletCard({
   const [balance, setBalance] = useState<string | null>(null)
   const [error, setError] = useState('')
 
-  const requiredAddress = user?.walletAddress ?? null
+  const requiredAddress = user?.walletType === 'external' ? (user?.walletAddress ?? null) : null
   const isWrongWallet = !!(account && requiredAddress && account.toLowerCase() !== requiredAddress.toLowerCase())
 
   async function fetchBalance(address: string) {
