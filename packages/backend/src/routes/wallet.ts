@@ -281,3 +281,43 @@ walletRouter.post('/send/token', async (req, res) => {
     res.status(e.status ?? 502).json({ error: e.message ?? 'Failed to reach SSO' })
   }
 })
+
+// POST /api/wallet/stake/prepare — returns raw unsigned tx params for approve + deposit
+// Frontend uses these to open the wallet popup, then calls /api/wallet/receipt to wait for mining.
+const stakePrepareSchema = z.object({
+  provider: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid provider address'),
+  amount: z.string().regex(/^\d+(\.\d+)?$/, 'Invalid amount'),
+  chainId: z.number().int().positive().optional(),
+})
+
+walletRouter.post('/stake/prepare', async (req, res) => {
+  const parsed = stakePrepareSchema.safeParse(req.body)
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.errors[0].message }); return }
+
+  const { provider, amount, chainId = 1 } = parsed.data
+  const amountWei = parseUnits(amount, TOKENS.SAN.decimals)
+
+  const approveData = ERC20_IFACE.encodeFunctionData('approve', [ARENA_STAKING_ADDRESS, amountWei])
+  const depositData = STAKING_IFACE.encodeFunctionData('deposit', [provider, amountWei])
+
+  res.json({
+    approveTx: { to: TOKENS.SAN.address, value: '0x0', data: approveData, chainId },
+    depositTx: { to: ARENA_STAKING_ADDRESS, value: '0x0', data: depositData, chainId },
+  })
+})
+
+// GET /api/wallet/receipt?tx=<hash> — waits for a transaction to be mined, then returns
+walletRouter.get('/receipt', async (req, res) => {
+  const tx = req.query['tx']
+  if (typeof tx !== 'string' || !/^0x[a-fA-F0-9]{64}$/.test(tx)) {
+    res.status(400).json({ error: 'Invalid tx hash' })
+    return
+  }
+  try {
+    await waitForReceipt(tx)
+    res.json({ mined: true })
+  } catch (err: unknown) {
+    const e = err as { status?: number; message?: string }
+    res.status(e.status ?? 504).json({ error: e.message ?? 'Receipt wait failed' })
+  }
+})

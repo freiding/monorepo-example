@@ -1,6 +1,13 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../api/client'
 import { useAuth } from '../context/AuthContext'
+import {
+  signMessageViaPopup,
+  sendTransactionViaPopup,
+  encodeERC20Transfer,
+  encodeERC20Approve,
+  parseUnits,
+} from '../api/wallet-popup'
 
 interface WalletInfo {
   address: string
@@ -217,6 +224,7 @@ function BalancesCard({ address }: { address: string }) {
 }
 
 function SignMessageCard({ walletId }: { walletId: string }) {
+  const { ssoConfig } = useAuth()
   const [message, setMessage] = useState('')
   const [signature, setSignature] = useState('')
   const [loading, setLoading] = useState(false)
@@ -228,11 +236,10 @@ function SignMessageCard({ walletId }: { walletId: string }) {
     setSignature('')
     setLoading(true)
     try {
-      const { data } = await api.post<{ signature: string }>('/api/wallet/sign', { message })
-      setSignature(data.signature)
+      const sig = await signMessageViaPopup(ssoConfig.issuer!, message)
+      setSignature(sig)
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { error?: string } } }).response?.data?.error
-      setError(msg || 'Failed to sign message')
+      setError((err as Error).message || 'Failed to sign message')
     } finally {
       setLoading(false)
     }
@@ -287,7 +294,13 @@ const SEND_LABELS: Record<SendMode, string> = {
   san: 'SAN',
 }
 
+const TOKENS = {
+  USDT: { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', decimals: 6 },
+  SAN: { address: '0x7c5a0ce9267ed19b22f8cae653f198e3e8daf098', decimals: 18 },
+}
+
 function SendCard() {
+  const { ssoConfig } = useAuth()
   const [mode, setMode] = useState<SendMode>('eth')
   const [to, setTo] = useState('')
   const [amount, setAmount] = useState('')
@@ -301,25 +314,29 @@ function SendCard() {
     setError('')
     setTxHash('')
     setLoading(true)
-    const caip2 = `eip155:${chain}`
+    const chainId = Number(chain)
     try {
-      let data: { transactionHash: string; caip2: string }
+      let hash: string
       if (mode === 'eth') {
-        const res = await api.post('/api/wallet/send', { to, value: amount, caip2 })
-        data = res.data
-      } else {
-        const res = await api.post('/api/wallet/send/token', {
-          token: mode.toUpperCase(),
+        const valueWei = parseUnits(amount, 18)
+        hash = await sendTransactionViaPopup(ssoConfig.issuer!, {
           to,
-          amount,
-          caip2,
+          value: '0x' + valueWei.toString(16),
+          chainId,
         })
-        data = res.data
+      } else {
+        const tokenInfo = TOKENS[mode.toUpperCase() as keyof typeof TOKENS]
+        const amountWei = parseUnits(amount, tokenInfo.decimals)
+        hash = await sendTransactionViaPopup(ssoConfig.issuer!, {
+          to: tokenInfo.address,
+          value: '0x0',
+          data: encodeERC20Transfer(to, amountWei),
+          chainId,
+        })
       }
-      setTxHash(data.transactionHash)
+      setTxHash(hash)
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { error?: string } } }).response?.data?.error
-      setError(msg || 'Transaction failed')
+      setError((err as Error).message || 'Transaction failed')
     } finally {
       setLoading(false)
     }
@@ -410,7 +427,15 @@ function SendCard() {
 
 const ARENA_STAKING_ADDRESS = '0xE20eD42dfb2957614b524B368FF74464a091C062'
 
+interface StakeTxParams {
+  to: string
+  value: string
+  data: string
+  chainId: number
+}
+
 function StakeDepositCard() {
+  const { ssoConfig } = useAuth()
   const [provider, setProvider] = useState('')
   const [amount, setAmount] = useState('')
   const [loading, setLoading] = useState(false)
@@ -423,18 +448,25 @@ function StakeDepositCard() {
     setError('')
     setResult(null)
     setLoading(true)
-    setStage('approving')
     try {
-      setStage('waiting')
-      const { data } = await api.post<{ approveTxHash: string; depositTxHash: string }>(
-        '/api/wallet/stake/deposit',
+      const { data: prepared } = await api.post<{ approveTx: StakeTxParams; depositTx: StakeTxParams }>(
+        '/api/wallet/stake/prepare',
         { provider, amount },
-        { timeout: 180_000 },
       )
-      setResult(data)
+
+      setStage('approving')
+      const approveTxHash = await sendTransactionViaPopup(ssoConfig.issuer!, prepared.approveTx)
+
+      setStage('waiting')
+      await api.get(`/api/wallet/receipt?tx=${approveTxHash}`, { timeout: 120_000 })
+
+      setStage('depositing')
+      const depositTxHash = await sendTransactionViaPopup(ssoConfig.issuer!, prepared.depositTx)
+
+      setResult({ approveTxHash, depositTxHash })
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { error?: string } } }
-      setError(e.response?.data?.error ?? 'Deposit failed')
+      const e = err as { response?: { data?: { error?: string } }; message?: string }
+      setError(e.response?.data?.error ?? e.message ?? 'Deposit failed')
     } finally {
       setLoading(false)
       setStage('idle')
