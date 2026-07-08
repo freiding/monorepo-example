@@ -121,22 +121,34 @@ async function proxyToSso(userId: string, path: string, init: RequestInit = {}) 
   return { status: resp.status, body }
 }
 
+type SsoWalletBody = { wallet_address?: string | null; wallet_type?: string | null; privy_wallet_id?: string | null }
+
+function normalizeWallet(body: unknown) {
+  const b = body as SsoWalletBody
+  return {
+    address: b.wallet_address ?? null,
+    walletType: b.wallet_type ?? null,
+    privyWalletId: b.privy_wallet_id ?? null,
+    balance: null,
+  }
+}
+
 // POST /api/wallet — get or create wallet
 walletRouter.post('/', async (req, res) => {
   try {
     const { status, body } = await proxyToSso(req.userId!, '/privy/wallet', { method: 'POST' })
-    res.status(status).json(body)
+    res.status(status).json(status === 200 ? normalizeWallet(body) : body)
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string }
     res.status(e.status ?? 502).json({ error: e.message ?? 'Failed to reach SSO' })
   }
 })
 
-// GET /api/wallet — wallet info + ETH balance
+// GET /api/wallet — wallet info
 walletRouter.get('/', async (req, res) => {
   try {
     const { status, body } = await proxyToSso(req.userId!, '/privy/wallet')
-    res.status(status).json(body)
+    res.status(status).json(status === 200 ? normalizeWallet(body) : body)
   } catch (err: unknown) {
     const e = err as { status?: number; message?: string }
     res.status(e.status ?? 502).json({ error: e.message ?? 'Failed to reach SSO' })
