@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { api } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import {
+  createWalletViaPopup,
   signMessageViaPopup,
   sendTransactionViaPopup,
   encodeERC20Transfer,
@@ -24,7 +25,7 @@ interface Balances {
 }
 
 export function WalletPage() {
-  const { user } = useAuth()
+  const { user, ssoConfig } = useAuth()
   const [wallet, setWallet] = useState<WalletInfo | null>(null)
   const [walletLoading, setWalletLoading] = useState(true)
   const [walletError, setWalletError] = useState('')
@@ -57,11 +58,10 @@ export function WalletPage() {
     setWalletLoading(true)
     setWalletError('')
     try {
-      const { data } = await api.post<WalletInfo>('/api/wallet')
-      setWallet(data)
+      await createWalletViaPopup(ssoConfig.issuer!)
+      await fetchWallet()
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { error?: string } } }).response?.data?.error
-      setWalletError(msg || 'Failed to create wallet')
+      setWalletError((err as Error).message || 'Failed to create wallet')
     } finally {
       setWalletLoading(false)
     }

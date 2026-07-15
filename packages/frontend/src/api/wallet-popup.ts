@@ -43,6 +43,12 @@ function openWalletPopup(ssoIssuer: string, params: Record<string, string>): Pro
   })
 }
 
+export async function createWalletViaPopup(ssoIssuer: string): Promise<string> {
+  const result = await openWalletPopup(ssoIssuer, { type: 'create' })
+  if (!result.address) throw new Error('No wallet address in response')
+  return result.address
+}
+
 export async function signMessageViaPopup(ssoIssuer: string, message: string): Promise<string> {
   const result = await openWalletPopup(ssoIssuer, { type: 'sign', message })
   if (!result.signature) throw new Error('No signature in response')
