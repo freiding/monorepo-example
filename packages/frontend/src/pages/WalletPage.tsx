@@ -10,8 +10,8 @@ import {
 } from '../api/wallet-popup'
 
 interface WalletInfo {
-  address: string
-  privyWalletId: string
+  address: string | null
+  privyWalletId: string | null
   balance: string | null
   status?: 'created' | 'exists'
 }
@@ -82,9 +82,9 @@ export function WalletPage() {
         onCreate={createWallet}
       />
 
-      {wallet && (
+      {wallet?.privyWalletId && (
         <>
-          <BalancesCard address={wallet.address} />
+          <BalancesCard address={wallet.address!} />
           <SignMessageCard walletId={wallet.privyWalletId} />
           <SendCard />
           <StakeDepositCard />
@@ -123,16 +123,18 @@ function WalletCard({
     if (wallet?.address) navigator.clipboard.writeText(wallet.address)
   }
 
+  const hasPrivyWallet = wallet?.privyWalletId
+
   return (
     <div className="bg-white border border-gray-100 rounded-2xl p-6">
       <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Embedded Wallet (Privy)</h2>
-      {wallet ? (
+      {hasPrivyWallet ? (
         <div className="space-y-3">
           <div>
             <p className="text-xs text-gray-400 mb-1">Address</p>
             <div className="flex items-center gap-2">
               <span className="font-mono text-sm bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-100 flex-1 truncate">
-                {wallet.address}
+                {wallet!.address}
               </span>
               <button
                 onClick={copyAddress}
@@ -145,13 +147,17 @@ function WalletCard({
           <div>
             <p className="text-xs text-gray-400 mb-1">ETH Balance</p>
             <p className="font-mono text-sm">
-              {wallet.balance !== null ? `${Number(wallet.balance).toFixed(6)} ETH` : 'N/A (ETH_RPC_URL not set)'}
+              {wallet!.balance !== null ? `${Number(wallet!.balance).toFixed(6)} ETH` : 'N/A (ETH_RPC_URL not set)'}
             </p>
           </div>
         </div>
       ) : (
         <div className="text-center py-6">
-          <p className="text-sm text-gray-400 mb-4">No embedded wallet yet. Create one to get started.</p>
+          <p className="text-sm text-gray-400 mb-4">
+            {wallet && !wallet.privyWalletId
+              ? 'Privy wallet is not set up for this account.'
+              : 'No embedded wallet yet. Create one to get started.'}
+          </p>
           <button
             onClick={onCreate}
             className="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
