@@ -51,8 +51,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   function logout() {
+    const wasSsoLogin = localStorage.getItem('sso_session') === '1'
     localStorage.removeItem('token')
+    localStorage.removeItem('sso_session')
     setUser(null)
+
+    // RP-Initiated Logout (OIDC): if the user signed in via SSO, also end the SSO
+    // session so a silent re-login (prompt=none / FedCM) doesn't log them straight
+    // back in. This is a full-page redirect; SSO clears its cookie and redirects
+    // back to post_logout_redirect_uri (which must be registered for this client).
+    if (wasSsoLogin && ssoConfig.enabled && ssoConfig.issuer && ssoConfig.clientId) {
+      const params = new URLSearchParams({
+        client_id: ssoConfig.clientId,
+        post_logout_redirect_uri: `${window.location.origin}/login`,
+        state: crypto.randomUUID(),
+      })
+      window.location.href = `${ssoConfig.issuer}/oauth/logout?${params}`
+    }
   }
 
   function updateUser(newUser: User) {

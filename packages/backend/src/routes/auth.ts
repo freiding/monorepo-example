@@ -86,15 +86,14 @@ interface SsoUserinfo {
   email?: string
   name?: string
   username?: string
-  wallet_address?: string       // external wallet (MetaMask/WalletConnect)
-  privy_wallet_address?: string // Privy embedded wallet
+  wallet_address?: string // wallet address bound to the SSO account (requires the `wallet` scope)
 }
 
 async function exchangeCodeForUserinfo(
   code: string,
   codeVerifier: string,
   redirectUri: string,
-): Promise<{ userinfo: SsoUserinfo; accessToken: string; refreshToken: string | null } | { error: string; status: number }> {
+): Promise<{ userinfo: SsoUserinfo } | { error: string; status: number }> {
   const ssoIssuer = process.env.SSO_ISSUER
   const clientId = process.env.SSO_CLIENT_ID
   const clientSecret = process.env.SSO_CLIENT_SECRET
@@ -104,7 +103,6 @@ async function exchangeCodeForUserinfo(
   }
 
   let accessToken: string
-  let refreshToken: string | null
   try {
     const tokenRes = await fetch(`${ssoIssuer}/oauth/token`, {
       method: 'POST',
@@ -122,9 +120,8 @@ async function exchangeCodeForUserinfo(
       const body = await tokenRes.text()
       return { error: `SSO token exchange failed: ${body}`, status: 400 }
     }
-    const data = await tokenRes.json() as { access_token: string; refresh_token?: string }
+    const data = await tokenRes.json() as { access_token: string }
     accessToken = data.access_token
-    refreshToken = data.refresh_token ?? null
   } catch {
     return { error: 'Could not reach SSO server', status: 502 }
   }
@@ -138,7 +135,7 @@ async function exchangeCodeForUserinfo(
     }
     const userinfo = await userinfoRes.json() as SsoUserinfo
     console.log('[SSO userinfo]', JSON.stringify(userinfo))
-    return { userinfo, accessToken, refreshToken }
+    return { userinfo }
   } catch {
     return { error: 'Could not reach SSO server', status: 502 }
   }
@@ -171,7 +168,7 @@ authRouter.post('/sso/exchange', async (req, res) => {
     res.status(outcome.status).json({ error: outcome.error })
     return
   }
-  const { userinfo, accessToken: ssoAccessToken, refreshToken: ssoRefreshToken } = outcome
+  const { userinfo } = outcome
 
   // Look up by ssoId first, then by email only if email is present
   let user = await prisma.user.findUnique({ where: { ssoId: userinfo.sub } })
@@ -193,12 +190,10 @@ authRouter.post('/sso/exchange', async (req, res) => {
         ssoId: userinfo.sub,
         password: null,
         username: usernameAvailable ? ssoUsername : null,
-        ssoAccessToken,
-        ssoRefreshToken,
       },
     })
   } else {
-    const updates: Record<string, string | null> = { ssoAccessToken, ssoRefreshToken }
+    const updates: Record<string, string | null> = {}
     if (!user.ssoId) updates.ssoId = userinfo.sub
     if (!user.email && userinfo.email) updates.email = userinfo.email
     if (!user.walletAddress && ssoWalletAddress) updates.walletAddress = ssoWalletAddress

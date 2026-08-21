@@ -57,6 +57,7 @@ export function SsoCallbackPage() {
       api.post('/api/auth/sso/migrate', { code, codeVerifier: verifier, redirectUri })
         .then(({ data }) => {
           const token = localStorage.getItem('token')!
+          localStorage.setItem('sso_session', '1')
           login(token, data.user)
           setMigrated(true)
           setTimeout(() => navigate('/tasks', { replace: true }), 2000)
@@ -68,6 +69,7 @@ export function SsoCallbackPage() {
     } else {
       api.post('/api/auth/sso/exchange', { code, codeVerifier: verifier, redirectUri })
         .then(({ data }) => {
+          localStorage.setItem('sso_session', '1')
           if (!data.user.username) {
             // New SSO user — store token for modal API calls, prompt for username
             localStorage.setItem('token', data.token)

@@ -16,4 +16,4 @@ COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 COPY prisma ./prisma
 EXPOSE 3000
-CMD ["sh", "-c", "npx prisma db push && node dist/index.js"]
+CMD ["sh", "-c", "npx prisma db push --accept-data-loss && node dist/index.js"]
