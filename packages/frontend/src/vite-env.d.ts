@@ -15,7 +15,10 @@ interface Window {
 interface IdentityProviderConfig {
   configURL: string
   clientId: string
-  nonce?: string
+  // Кастомные параметры, которые браузер сериализует в JSON и передаёт на
+  // id-assertion эндпоинт IdP. Начиная с Chrome 143 nonce надо класть сюда,
+  // а не в top-level поле (top-level удаляется в Chrome 145).
+  params?: Record<string, string>
   loginHint?: string
 }
 

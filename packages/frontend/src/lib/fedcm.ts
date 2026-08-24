@@ -57,7 +57,9 @@ export async function fedcmLogin(opts: FedcmLoginOptions): Promise<FedcmResult |
     identity: {
       context: 'signin',
       mode,
-      providers: [{ configURL: `${issuer}/fedcm/config.json`, clientId, nonce }],
+      // nonce передаётся внутри params (требование Chrome 143+, top-level удаляют
+      // в Chrome 145). Браузер сериализует params в JSON и шлёт на assertion-эндпоинт.
+      providers: [{ configURL: `${issuer}/fedcm/config.json`, clientId, params: { nonce } }],
     },
     mediation,
     signal,
