@@ -87,6 +87,7 @@ interface SsoUserinfo {
   email?: string
   name?: string
   username?: string
+  picture?: string // avatar URL (OIDC `picture` claim; requires the `profile` scope)
   wallet_address?: string // wallet address bound to the SSO account (requires the `wallet` scope)
 }
 
@@ -153,6 +154,7 @@ function resolveSsoUsername(raw: string | null): string | null {
 async function syncSsoUser(userinfo: SsoUserinfo) {
   const ssoUsername = resolveSsoUsername(userinfo.username ?? null)
   const ssoWalletAddress = userinfo.wallet_address?.toLowerCase() ?? null
+  const ssoAvatar = userinfo.picture ?? null
 
   // Look up by ssoId first, then by email, then by walletAddress. Each of these
   // is unique, so an existing account holding any of them must be linked instead
@@ -182,6 +184,7 @@ async function syncSsoUser(userinfo: SsoUserinfo) {
         ssoId: userinfo.sub,
         password: null,
         username: usernameAvailable ? ssoUsername : null,
+        avatar: ssoAvatar,
       },
     })
   } else {
@@ -196,6 +199,7 @@ async function syncSsoUser(userinfo: SsoUserinfo) {
       const usernameAvailable = !(await prisma.user.findUnique({ where: { username: ssoUsername } }))
       if (usernameAvailable) updates.username = ssoUsername
     }
+    if (!user.avatar && ssoAvatar) updates.avatar = ssoAvatar
     user = await prisma.user.update({ where: { id: user.id }, data: updates })
   }
   return user
@@ -291,10 +295,16 @@ authRouter.post('/sso/fedcm', async (req, res) => {
     return
   }
 
+  // Diagnostic: which claims the FedCM id_token actually carries. If preferred_username
+  // is absent here, the SSO account has no username yet (or the client isn't granted the
+  // `profile` scope), which is why the client would fall back to the profile-setup form.
+  console.log('[SSO fedcm claims]', JSON.stringify(payload))
+
   const userinfo: SsoUserinfo = {
     sub: payload.sub,
     email: typeof payload.email === 'string' ? payload.email : undefined,
     username: typeof payload.preferred_username === 'string' ? payload.preferred_username : undefined,
+    picture: typeof payload.picture === 'string' ? payload.picture : undefined,
     wallet_address: typeof payload.wallet_address === 'string' ? payload.wallet_address : undefined,
   }
 
