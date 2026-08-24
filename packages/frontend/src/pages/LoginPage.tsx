@@ -20,7 +20,7 @@ export function LoginPage() {
   // login() в контекст НЕ вызываем, иначе PublicRoute сразу редиректит
   const [pendingAuth, setPendingAuth] = useState<{ token: string; user: User } | null>(null)
   const [pendingSetup, setPendingSetup] = useState<{ token: string } | null>(null)
-  const { login, ssoConfig } = useAuth()
+  const { login, ssoConfig, fedcmChecking } = useAuth()
   const navigate = useNavigate()
 
   async function buildSsoUrl(intent: 'login' | 'migrate'): Promise<string> {
@@ -81,6 +81,9 @@ export function LoginPage() {
         issuer: ssoConfig.issuer,
         clientId: ssoConfig.clientId,
         mediation: 'optional',
+        // Button Mode: вызов по клику, не подчиняется cooldown'у после закрытия
+        // диалога — поэтому повторное нажатие всегда открывает выбор аккаунта.
+        mode: 'active',
       })
       if (!result) {
         setFedcmError('No account available for silent sign-in')
@@ -182,15 +185,26 @@ export function LoginPage() {
           </button>
         )}
 
-        {ssoConfig.enabled && isFedcmSupported() && (
+        {/* Основной путь — фоновая passive-проверка FedCM (запускается в
+            AuthContext на загрузке). Пока она идёт, показываем ненавязчивый
+            индикатор вместо кнопки: браузер сам покажет свой account-chooser. */}
+        {ssoConfig.enabled && isFedcmSupported() && fedcmChecking && (
+          <div className="w-full flex items-center justify-center gap-2 py-2.5 text-sm text-gray-400 mb-2">
+            <Spinner />
+            Checking single sign-on…
+          </div>
+        )}
+
+        {/* Резерв: если авто-вход не сработал (нет сессии/согласия, диалог закрыт
+            или сработал embargo) — явная кнопка в active-режиме, обходящем cooldown. */}
+        {ssoConfig.enabled && isFedcmSupported() && !fedcmChecking && (
           <button
             type="button"
             onClick={handleFedcmLogin}
             disabled={fedcmLoading}
-            className="w-full flex items-center justify-center gap-2 border border-gray-200 rounded-lg py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 mb-2"
+            className="w-full flex items-center justify-center gap-2 text-sm text-gray-500 hover:text-gray-700 underline underline-offset-2 py-2 transition-colors disabled:opacity-50 mb-2"
           >
-            <SsoIcon />
-            {fedcmLoading ? 'Signing in...' : 'Continue with FedCM'}
+            {fedcmLoading ? 'Signing in…' : "Didn't sign in automatically? Continue with FedCM"}
           </button>
         )}
         {fedcmError && <p className="text-sm text-red-500 mb-2">{fedcmError}</p>}
@@ -273,6 +287,15 @@ function SsoIcon() {
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
       <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </svg>
+  )
+}
+
+function Spinner() {
+  return (
+    <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" />
+      <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
     </svg>
   )
 }

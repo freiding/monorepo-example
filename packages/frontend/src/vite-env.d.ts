@@ -22,6 +22,9 @@ interface IdentityProviderConfig {
 interface IdentityCredentialRequestOptions {
   context?: 'signin' | 'signup' | 'use' | 'continue'
   providers: IdentityProviderConfig[]
+  // Button Mode API: 'active' открывает FedCM-диалог по явному действию пользователя
+  // и НЕ подчиняется cooldown/embargo после закрытия диалога (в отличие от 'passive').
+  mode?: 'active' | 'passive'
 }
 
 interface CredentialRequestOptions {

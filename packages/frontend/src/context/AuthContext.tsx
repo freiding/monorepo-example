@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 import { api } from '../api/client'
-import { isFedcmSupported, silentFedcmLogin } from '../lib/fedcm'
+import { isFedcmSupported, silentFedcmLogin, passiveFedcmLogin } from '../lib/fedcm'
 
 export interface User {
   id: string
@@ -23,6 +23,9 @@ interface AuthContextValue {
   logout: () => void
   updateUser: (user: User) => void
   loading: boolean
+  // true, пока на /login идёт фоновая passive-проверка FedCM (основной путь входа).
+  // LoginPage по нему показывает индикатор и держит кнопку-резерв скрытой.
+  fedcmChecking: boolean
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -31,9 +34,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [ssoConfig, setSsoConfig] = useState<SsoConfig>({ enabled: false })
   const [loading, setLoading] = useState(true)
+  const [fedcmChecking, setFedcmChecking] = useState(false)
 
   useEffect(() => {
     let cancelled = false
+
+    // Применяет успешный FedCM-результат к состоянию/хранилищу.
+    function applyFedcmResult(result: { token: string; user: User }) {
+      localStorage.setItem('token', result.token)
+      localStorage.setItem('sso_session', '1')
+      setUser(result.user)
+    }
 
     async function init() {
       // 1. SSO-конфиг нужен и для FedCM, и для обычного SSO — грузим всегда.
@@ -55,20 +66,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      // 3. Локальной сессии нет → пробуем silent-вход через FedCM. Если у
-      // пользователя есть активная SSO-сессия и он уже давал согласие этому
-      // приложению, браузер молча вернёт id_token и мы войдём без единого клика.
-      // Иначе — тихо остаёмся на странице логина.
-      if (!cancelled && cfg.enabled && cfg.issuer && cfg.clientId && isFedcmSupported()) {
-        const result = await silentFedcmLogin({ issuer: cfg.issuer, clientId: cfg.clientId })
+      const fedcmReady = cfg.enabled && !!cfg.issuer && !!cfg.clientId && isFedcmSupported()
+
+      // 3. ОСНОВНОЙ путь — фоновый FedCM. Сначала бесшумный auto-reauthn (без UI):
+      // вернувшийся пользователь с активной SSO-сессией и ранее данным согласием
+      // входит seamless, без мигания страницы логина.
+      if (!cancelled && fedcmReady) {
+        const result = await silentFedcmLogin({ issuer: cfg.issuer!, clientId: cfg.clientId! })
         if (result && !cancelled) {
-          localStorage.setItem('token', result.token)
-          localStorage.setItem('sso_session', '1')
-          setUser(result.user)
+          applyFedcmResult(result)
+          setLoading(false)
+          return
         }
       }
 
+      // Бесшумно войти не удалось — показываем приложение (страницу логина) и
+      // параллельно запускаем passive-попытку: браузер сам покажет свой нативный
+      // account-chooser поверх страницы. Не блокируем рендер ожиданием промпта.
       if (!cancelled) setLoading(false)
+
+      if (!cancelled && fedcmReady) {
+        setFedcmChecking(true)
+        passiveFedcmLogin({ issuer: cfg.issuer!, clientId: cfg.clientId! })
+          .then(result => {
+            if (cancelled) return
+            if (result) applyFedcmResult(result)
+          })
+          .finally(() => { if (!cancelled) setFedcmChecking(false) })
+      }
     }
 
     init()
@@ -109,7 +134,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, ssoConfig, login, logout, updateUser, loading }}>
+    <AuthContext.Provider value={{ user, ssoConfig, login, logout, updateUser, loading, fedcmChecking }}>
       {children}
     </AuthContext.Provider>
   )

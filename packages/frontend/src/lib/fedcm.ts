@@ -21,6 +21,11 @@ interface FedcmLoginOptions {
   // 'optional' — тихий вход для вернувшихся, иначе показать выбор аккаунта (по клику).
   // 'required' — всегда показывать выбор аккаунта.
   mediation?: 'silent' | 'optional' | 'required'
+  // 'passive' (по умолчанию) — обычный фоновый режим; после того как пользователь
+  //   закрыл диалог, Chrome вводит cooldown/embargo и перестаёт его показывать.
+  // 'active'  — Button Mode: вызывается по явному клику, всегда показывает диалог и
+  //   НЕ подчиняется этому cooldown'у. Используем для интерактивной кнопки входа.
+  mode?: 'active' | 'passive'
   signal?: AbortSignal
 }
 
@@ -42,7 +47,7 @@ export function isFedcmSupported(): boolean {
  * её показать.
  */
 export async function fedcmLogin(opts: FedcmLoginOptions): Promise<FedcmResult | null> {
-  const { issuer, clientId, mediation = 'optional', signal } = opts
+  const { issuer, clientId, mediation = 'optional', mode = 'passive', signal } = opts
 
   // nonce связывает выданный токен с этим конкретным запросом — бэкенд проверит
   // совпадение, чтобы исключить повторное использование чужого токена.
@@ -51,6 +56,7 @@ export async function fedcmLogin(opts: FedcmLoginOptions): Promise<FedcmResult |
   const credential = await navigator.credentials.get({
     identity: {
       context: 'signin',
+      mode,
       providers: [{ configURL: `${issuer}/fedcm/config.json`, clientId, nonce }],
     },
     mediation,
@@ -65,15 +71,34 @@ export async function fedcmLogin(opts: FedcmLoginOptions): Promise<FedcmResult |
 }
 
 /**
- * Пассивная (silent) попытка входа: без UI. Успешна только для вернувшегося
- * пользователя с активной SSO-сессией. Любая ошибка/отсутствие credential →
- * возвращаем null и остаёмся неавторизованными.
+ * Бесшумный авто-релогин: без какого-либо UI. Успешен только для вернувшегося
+ * пользователя, у которого есть активная SSO-сессия И ранее данное согласие
+ * (browser auto-reauthn). Иначе — null. Используем на загрузке страницы, чтобы
+ * seamless-вернуть пользователя без единого клика и без мигания UI.
  */
 export async function silentFedcmLogin(
-  opts: Omit<FedcmLoginOptions, 'mediation'>,
+  opts: Omit<FedcmLoginOptions, 'mediation' | 'mode'>,
 ): Promise<FedcmResult | null> {
   try {
-    return await fedcmLogin({ ...opts, mediation: 'silent' })
+    return await fedcmLogin({ ...opts, mediation: 'silent', mode: 'passive' })
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Фоновая пассивная попытка входа (mediation: 'optional', passive mode) — ОСНОВНОЙ
+ * путь входа. Браузер сам делает auto-reauthn либо показывает свой нативный
+ * account-chooser поверх страницы; нам не нужна собственная кнопка. Любая ошибка
+ * или отказ пользователя → null (тихо остаёмся на /login, где есть кнопка-резерв).
+ * Не подходит для вызова без предшествующего passive-показа только в случае
+ * embargo — тогда выручает active-режим кнопки.
+ */
+export async function passiveFedcmLogin(
+  opts: Omit<FedcmLoginOptions, 'mediation' | 'mode'>,
+): Promise<FedcmResult | null> {
+  try {
+    return await fedcmLogin({ ...opts, mediation: 'optional', mode: 'passive' })
   } catch {
     return null
   }
