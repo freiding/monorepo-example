@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth, User } from '../context/AuthContext'
 import { generateCodeVerifier, generateCodeChallenge } from '../lib/pkce'
+import { fedcmLogin, isFedcmSupported } from '../lib/fedcm'
 import { SsoMigrationModal } from '../components/SsoMigrationModal'
 import { SetupProfileModal } from '../components/SetupProfileModal'
 
@@ -13,6 +14,8 @@ export function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [walletLoading, setWalletLoading] = useState(false)
   const [walletError, setWalletError] = useState('')
+  const [fedcmLoading, setFedcmLoading] = useState(false)
+  const [fedcmError, setFedcmError] = useState('')
   // Держим токен/юзера локально пока показывается модалка —
   // login() в контекст НЕ вызываем, иначе PublicRoute сразу редиректит
   const [pendingAuth, setPendingAuth] = useState<{ token: string; user: User } | null>(null)
@@ -64,6 +67,44 @@ export function LoginPage() {
   async function handleSsoLogin() {
     if (!ssoConfig.enabled) return
     window.location.href = await buildSsoUrl('login')
+  }
+
+  // Интерактивный FedCM-вход (mediation: 'optional') — показывает диалог выбора
+  // аккаунта. Нужен для первого согласия; после него автоматический silent-вход
+  // в AuthContext будет входить молча.
+  async function handleFedcmLogin() {
+    if (!ssoConfig.enabled || !ssoConfig.issuer || !ssoConfig.clientId) return
+    setFedcmError('')
+    setFedcmLoading(true)
+    try {
+      const result = await fedcmLogin({
+        issuer: ssoConfig.issuer,
+        clientId: ssoConfig.clientId,
+        mediation: 'optional',
+      })
+      if (!result) {
+        setFedcmError('No account available for silent sign-in')
+        return
+      }
+      localStorage.setItem('sso_session', '1')
+      if (!result.user.username) {
+        localStorage.setItem('token', result.token)
+        setPendingSetup({ token: result.token })
+      } else {
+        login(result.token, result.user)
+        navigate('/tasks')
+      }
+    } catch (err: unknown) {
+      // NotAllowedError — пользователь закрыл диалог; остальное — сеть/конфиг.
+      const name = (err as { name?: string }).name
+      if (name !== 'NotAllowedError' && name !== 'AbortError') {
+        const msg = (err as { response?: { data?: { error?: string } }; message?: string })
+          .response?.data?.error
+        setFedcmError(msg || 'FedCM sign-in failed')
+      }
+    } finally {
+      setFedcmLoading(false)
+    }
   }
 
   async function handleMigrate() {
@@ -140,6 +181,19 @@ export function LoginPage() {
             Continue with SSO
           </button>
         )}
+
+        {ssoConfig.enabled && isFedcmSupported() && (
+          <button
+            type="button"
+            onClick={handleFedcmLogin}
+            disabled={fedcmLoading}
+            className="w-full flex items-center justify-center gap-2 border border-gray-200 rounded-lg py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 mb-2"
+          >
+            <SsoIcon />
+            {fedcmLoading ? 'Signing in...' : 'Continue with FedCM'}
+          </button>
+        )}
+        {fedcmError && <p className="text-sm text-red-500 mb-2">{fedcmError}</p>}
 
         <button
           type="button"
