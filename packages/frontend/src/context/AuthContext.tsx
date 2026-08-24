@@ -47,14 +47,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     async function init() {
-      // 1. SSO-конфиг нужен и для FedCM, и для обычного SSO — грузим всегда.
-      let cfg: SsoConfig = { enabled: false }
-      try {
-        cfg = (await api.get<SsoConfig>('/api/auth/sso/config')).data
-        if (!cancelled) setSsoConfig(cfg)
-      } catch { /* SSO недоступен — не критично */ }
+      // 1. SSO-конфиг грузим в фоне — он НЕ должен задерживать первый рендер.
+      // Кнопки SSO/FedCM появятся, как только конфиг приедет; FedCM стартует
+      // по готовности этого промиса (см. ниже).
+      const cfgPromise = api.get<SsoConfig>('/api/auth/sso/config')
+        .then(res => { if (!cancelled) setSsoConfig(res.data); return res.data })
+        .catch(() => ({ enabled: false } as SsoConfig))
 
-      // 2. Есть локальный токен — проверяем его и, если валиден, входим.
+      // 2. loading гейтит ТОЛЬКО валидация сохранённого токена — это единственное,
+      // что определяет начальное состояние (показать приложение или страницу входа).
       const token = localStorage.getItem('token')
       if (token) {
         try {
@@ -65,35 +66,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           localStorage.removeItem('token')
         }
       }
-
-      const fedcmReady = cfg.enabled && !!cfg.issuer && !!cfg.clientId && isFedcmSupported()
-
-      // 3. ОСНОВНОЙ путь — фоновый FedCM. Сначала бесшумный auto-reauthn (без UI):
-      // вернувшийся пользователь с активной SSO-сессией и ранее данным согласием
-      // входит seamless, без мигания страницы логина.
-      if (!cancelled && fedcmReady) {
-        const result = await silentFedcmLogin({ issuer: cfg.issuer!, clientId: cfg.clientId! })
-        if (result && !cancelled) {
-          applyFedcmResult(result)
-          setLoading(false)
-          return
-        }
-      }
-
-      // Бесшумно войти не удалось — показываем приложение (страницу логина) и
-      // параллельно запускаем passive-попытку: браузер сам покажет свой нативный
-      // account-chooser поверх страницы. Не блокируем рендер ожиданием промпта.
+      // Нет валидного токена → сразу рисуем страницу входа, не дожидаясь FedCM.
       if (!cancelled) setLoading(false)
 
-      if (!cancelled && fedcmReady) {
-        setFedcmChecking(true)
-        passiveFedcmLogin({ issuer: cfg.issuer!, clientId: cfg.clientId! })
-          .then(result => {
-            if (cancelled) return
-            if (result) applyFedcmResult(result)
-          })
-          .finally(() => { if (!cancelled) setFedcmChecking(false) })
-      }
+      // 3. Весь FedCM — в фоне, поверх уже отрисованной страницы.
+      const cfg = await cfgPromise
+      if (cancelled) return
+      const fedcmReady = cfg.enabled && !!cfg.issuer && !!cfg.clientId && isFedcmSupported()
+      if (!fedcmReady) return
+
+      // 3a. Бесшумный auto-reauthn (без UI, не вызывает embargo) — seamless-вход
+      // вернувшегося пользователя.
+      const silent = await silentFedcmLogin({ issuer: cfg.issuer!, clientId: cfg.clientId! })
+      if (cancelled) return
+      if (silent) { applyFedcmResult(silent); return }
+
+      // 3b. Passive-промпт (браузер сам покажет account-chooser) — но НЕ чаще одного
+      // раза за вкладку/сессию. Иначе повторные авто-показы, которые пользователь не
+      // подтверждает, Chrome трактует как отказы и эскалирует embargo. Дальше в дело
+      // вступает кнопка-резерв в active-режиме.
+      if (sessionStorage.getItem('fedcm_passive_tried')) return
+      sessionStorage.setItem('fedcm_passive_tried', '1')
+
+      setFedcmChecking(true)
+      passiveFedcmLogin({ issuer: cfg.issuer!, clientId: cfg.clientId! })
+        .then(result => {
+          if (cancelled) return
+          if (result) applyFedcmResult(result)
+        })
+        .finally(() => { if (!cancelled) setFedcmChecking(false) })
     }
 
     init()
