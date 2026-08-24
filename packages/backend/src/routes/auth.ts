@@ -151,23 +151,34 @@ function resolveSsoUsername(raw: string | null): string | null {
 // Create/link a local user from SSO claims. Shared by the code-exchange flow
 // (/sso/exchange) and the FedCM flow (/sso/fedcm) so both stay in sync.
 async function syncSsoUser(userinfo: SsoUserinfo) {
-  // Look up by ssoId first, then by email only if email is present
+  const ssoUsername = resolveSsoUsername(userinfo.username ?? null)
+  const ssoWalletAddress = userinfo.wallet_address?.toLowerCase() ?? null
+
+  // Look up by ssoId first, then by email, then by walletAddress. Each of these
+  // is unique, so an existing account holding any of them must be linked instead
+  // of creating a new row (otherwise the unique constraint fails, e.g. P2002 on
+  // walletAddress).
   let user = await prisma.user.findUnique({ where: { ssoId: userinfo.sub } })
   if (!user && userinfo.email) {
     user = await prisma.user.findUnique({ where: { email: userinfo.email } })
   }
-
-  const ssoUsername = resolveSsoUsername(userinfo.username ?? null)
-  const ssoWalletAddress = userinfo.wallet_address?.toLowerCase() ?? null
+  if (!user && ssoWalletAddress) {
+    user = await prisma.user.findUnique({ where: { walletAddress: ssoWalletAddress } })
+  }
 
   if (!user) {
     const usernameAvailable = ssoUsername
       ? !(await prisma.user.findUnique({ where: { username: ssoUsername } }))
       : false
+    // walletAddress is unique; guard against a value already taken by another
+    // account (the lookup above only linked it when it belonged to *this* user).
+    const walletAvailable = ssoWalletAddress
+      ? !(await prisma.user.findUnique({ where: { walletAddress: ssoWalletAddress } }))
+      : false
     user = await prisma.user.create({
       data: {
         email: userinfo.email ?? null,
-        walletAddress: ssoWalletAddress,
+        walletAddress: walletAvailable ? ssoWalletAddress : null,
         ssoId: userinfo.sub,
         password: null,
         username: usernameAvailable ? ssoUsername : null,
@@ -177,7 +188,10 @@ async function syncSsoUser(userinfo: SsoUserinfo) {
     const updates: Record<string, string | null> = {}
     if (!user.ssoId) updates.ssoId = userinfo.sub
     if (!user.email && userinfo.email) updates.email = userinfo.email
-    if (!user.walletAddress && ssoWalletAddress) updates.walletAddress = ssoWalletAddress
+    if (!user.walletAddress && ssoWalletAddress) {
+      const walletAvailable = !(await prisma.user.findUnique({ where: { walletAddress: ssoWalletAddress } }))
+      if (walletAvailable) updates.walletAddress = ssoWalletAddress
+    }
     if (!user.username && ssoUsername) {
       const usernameAvailable = !(await prisma.user.findUnique({ where: { username: ssoUsername } }))
       if (usernameAvailable) updates.username = ssoUsername
